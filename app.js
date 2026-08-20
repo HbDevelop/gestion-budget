@@ -135,7 +135,7 @@ let monthData = null;
 let catalog = null;
 let saveTimeout = null;
 let currentView = "suivi";
-let charts = { pie: null, bar: null, line: null, investment: null };
+let charts = { pie: null, pieAvg: null, line: null, investment: null };
 
 // ---- DOM ----
 const $ = (sel) => document.querySelector(sel);
@@ -616,44 +616,76 @@ async function removeItem(itemId, ids, monthsByI) {
 }
 
 // ---- Analyse budget (graphiques) ----
+const PIE_LABELS = ["Charges régulières", "Charges occasionnelles", "Capital et réserves", "Reste à vivre"];
+const PIE_COLORS = ["#dc2626", "#f59e0b", "#059669", "#2563eb"];
+
+// Légende + info-bulles avec le pourcentage de chaque part, en plus du montant.
+function pieOptions(dataset) {
+  const total = dataset.reduce((s, v) => s + v, 0) || 1;
+  return {
+    plugins: {
+      legend: {
+        position: "bottom",
+        labels: {
+          generateLabels(chart) {
+            const ds = chart.data.datasets[0];
+            return chart.data.labels.map((label, i) => ({
+              text: `${label} (${Math.round((ds.data[i] / total) * 100)}%)`,
+              fillStyle: ds.backgroundColor[i],
+              strokeStyle: ds.backgroundColor[i],
+              index: i
+            }));
+          }
+        }
+      },
+      tooltip: {
+        callbacks: {
+          label: (ctx) => `${ctx.label}: ${euros(ctx.parsed)} (${Math.round((ctx.parsed / total) * 100)}%)`
+        }
+      }
+    }
+  };
+}
+
 async function renderAnalyse() {
   analyseMonthLabel.textContent = monthLabel(currentMonthId);
   const data = monthData || (await fetchMonth(currentMonthId)) || { values: {} };
   const t = computeTotals(catalog, data);
+  const settings = await fetchSettings();
+  const months = await fetchAllMonthsAsc();
 
   Object.values(charts).forEach((c) => c?.destroy());
 
+  const pieData = [t.byGroup.regulieres, t.byGroup.occasionnelles, t.byGroup.capital, Math.max(t.balance, 0)];
   charts.pie = new Chart($("#chart-pie"), {
     type: "pie",
-    data: {
-      labels: ["Charges régulières", "Charges occasionnelles", "Capital et réserves", "Reste à vivre"],
-      datasets: [{
-        data: [t.byGroup.regulieres, t.byGroup.occasionnelles, t.byGroup.capital, Math.max(t.balance, 0)],
-        backgroundColor: ["#dc2626", "#f59e0b", "#059669", "#2563eb"]
-      }]
-    },
-    options: { plugins: { legend: { position: "bottom" } } }
+    data: { labels: PIE_LABELS, datasets: [{ data: pieData, backgroundColor: PIE_COLORS }] },
+    options: pieOptions(pieData)
   });
 
-  const regulieres = catalog.items
-    .filter((it) => it.type === "regulieres")
-    .map((it) => ({ label: it.label, amount: (data.values[it.id] && data.values[it.id].amount) || 0 }))
-    .filter((r) => r.amount > 0);
-  charts.bar = new Chart($("#chart-bar"), {
-    type: "bar",
-    data: {
-      labels: regulieres.map((r) => r.label),
-      datasets: [{ label: "Montant", data: regulieres.map((r) => r.amount), backgroundColor: "#2563eb" }]
-    },
-    options: { plugins: { legend: { display: false } }, scales: { x: { ticks: { autoSkip: false, maxRotation: 60, minRotation: 30 } } } }
+  const pastId = monthId(new Date());
+  const pastMonths = months.filter(({ id }) => id < pastId);
+  const avgData = [0, 0, 0, 0];
+  if (pastMonths.length) {
+    pastMonths.forEach(({ data: d }) => {
+      const dt = computeTotals(catalog, d);
+      avgData[0] += dt.byGroup.regulieres;
+      avgData[1] += dt.byGroup.occasionnelles;
+      avgData[2] += dt.byGroup.capital;
+      avgData[3] += Math.max(dt.balance, 0);
+    });
+    for (let i = 0; i < avgData.length; i++) avgData[i] /= pastMonths.length;
+  }
+  charts.pieAvg = new Chart($("#chart-pie-avg"), {
+    type: "pie",
+    data: { labels: PIE_LABELS, datasets: [{ data: avgData, backgroundColor: PIE_COLORS }] },
+    options: pieOptions(avgData)
   });
 
   // Épargne cumulée = solde de départ + somme glissante de (Épargne du mois - Virement de
   // l'épargne du mois). L'Investissement n'entre pas en compte : c'est un poste distinct.
   const epargneItem = catalog.items.find((it) => it.role === "epargne");
   const virementItem = catalog.items.find((it) => it.role === "epargne_out");
-  const settings = await fetchSettings();
-  const months = await fetchAllMonthsAsc();
   let cumul = settings.epargneBase || 0;
   const labels = [];
   const values = [];
