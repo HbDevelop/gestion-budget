@@ -242,8 +242,14 @@ body {
   font-weight: 600;
   position: static;
 }
-.forecast-table .subtotal-row td { background: var(--bg); font-weight: 600; position: static; }
-.forecast-table .subtotal-row td:first-child { background: var(--bg); }
+.forecast-table .subtotal-row td {
+  background: #dde3ea;
+  font-weight: 700;
+  position: static;
+  border-top: 2px solid var(--border);
+  border-bottom: 2px solid var(--border);
+}
+.forecast-table .subtotal-row td:first-child { background: #dde3ea; }
 .forecast-table .total-row td { background: #eff6ff; font-weight: 700; position: static; }
 .forecast-table .total-row td:first-child { background: #eff6ff; }
 .forecast-input {
