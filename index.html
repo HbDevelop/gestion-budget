@@ -6,6 +6,7 @@
   <title>Gestion Budget</title>
   <link rel="stylesheet" href="style.css" />
   <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 </head>
 <body>
 
@@ -27,95 +28,140 @@
   </div>
 
   <!-- App principale -->
-  <div id="app-screen" class="screen hidden">
+  <div id="app-shell" class="hidden">
     <header class="topbar">
       <h1>💶 Gestion Budget</h1>
+      <nav class="main-nav">
+        <button data-view="suivi" class="nav-btn active">Suivi du mois</button>
+        <button data-view="previsions" class="nav-btn">Prévisions</button>
+        <button data-view="historique" class="nav-btn">Historique</button>
+        <button data-view="analyse" class="nav-btn">Analyse</button>
+      </nav>
       <div class="topbar-actions">
         <span id="user-label" class="user-label"></span>
-        <button id="history-btn" class="btn small">Historique</button>
         <button id="logout-btn" class="btn small">Déconnexion</button>
       </div>
     </header>
 
-    <div class="month-nav">
-      <button id="prev-month" class="btn small" aria-label="Mois précédent">←</button>
-      <h2 id="month-title"></h2>
-      <button id="next-month" class="btn small" aria-label="Mois suivant">→</button>
-      <span id="save-status" class="save-status"></span>
-    </div>
+    <!-- Vue : Suivi du mois -->
+    <div id="view-suivi" class="view">
+      <div class="month-nav">
+        <button id="prev-month" class="btn small" aria-label="Mois précédent">←</button>
+        <h2 id="month-title"></h2>
+        <button id="next-month" class="btn small" aria-label="Mois suivant">→</button>
+        <span id="save-status" class="save-status"></span>
+      </div>
 
-    <div id="empty-month-banner" class="banner hidden">
-      <p>Ce mois n'a pas encore de données.</p>
-      <button id="create-month-btn" class="btn primary">Créer ce mois à partir du précédent</button>
-    </div>
+      <div id="empty-month-banner" class="banner hidden">
+        <p>Ce mois n'a pas encore de données.</p>
+        <button id="create-month-btn" class="btn primary">Créer ce mois à partir du précédent</button>
+      </div>
 
-    <main class="content">
-      <section class="summary">
-        <div class="summary-card">
-          <span class="summary-label">Revenus</span>
-          <span id="total-income" class="summary-value">0 €</span>
-        </div>
-        <div class="summary-card">
-          <span class="summary-label">Dépenses</span>
-          <span id="total-expenses" class="summary-value">0 €</span>
-        </div>
-        <div class="summary-card">
-          <span class="summary-label">Solde</span>
-          <span id="balance" class="summary-value">0 €</span>
-        </div>
-        <div class="summary-card highlight">
-          <span class="summary-label">Allocation / jour restant</span>
-          <span id="daily-allocation" class="summary-value">0 €</span>
-        </div>
-      </section>
-
-      <section class="card">
-        <div class="card-header">
-          <h2>Revenus</h2>
-          <button id="add-income" type="button" class="add-row-btn">+ Ajouter</button>
-        </div>
-        <div id="income-list" class="rows"></div>
-      </section>
-
-      <div id="groups-container"></div>
-
-      <section class="card">
-        <div class="card-header">
-          <h2>Épargne</h2>
-        </div>
-        <div class="savings-grid">
-          <label>Disponible en début de mois
-            <input id="savings-disponible" type="number" step="0.01" />
-          </label>
-          <label>Dépôts
-            <input id="savings-depots" type="number" step="0.01" />
-          </label>
-          <label>Retraits
-            <input id="savings-retraits" type="number" step="0.01" />
-          </label>
-          <div class="savings-total">
-            <span>Total épargne</span>
-            <span id="savings-total">0 €</span>
+      <main class="content">
+        <section class="summary">
+          <div class="summary-card">
+            <span class="summary-label">Revenus</span>
+            <span id="total-income" class="summary-value">0 €</span>
           </div>
-        </div>
-      </section>
-    </main>
-  </div>
+          <div class="summary-card">
+            <span class="summary-label">Dépenses</span>
+            <span id="total-expenses" class="summary-value">0 €</span>
+          </div>
+          <div class="summary-card">
+            <span class="summary-label">Solde prévisionnel</span>
+            <span id="balance" class="summary-value">0 €</span>
+          </div>
+        </section>
 
-  <!-- Historique -->
-  <div id="history-screen" class="screen hidden">
-    <header class="topbar">
-      <h1>📊 Historique</h1>
-      <button id="back-to-month" class="btn small">← Retour</button>
-    </header>
-    <main class="content">
-      <table class="history-table">
-        <thead>
-          <tr><th>Mois</th><th>Revenus</th><th>Dépenses</th><th>Solde</th></tr>
-        </thead>
-        <tbody id="history-body"></tbody>
-      </table>
-    </main>
+        <section class="card live-panel">
+          <div class="card-header">
+            <h2>Suivi en temps réel</h2>
+          </div>
+          <div class="live-grid">
+            <div class="live-field">
+              <span class="live-label">Jours restants</span>
+              <span id="days-left" class="live-value">0</span>
+            </div>
+            <label class="live-field">
+              <span class="live-label">Solde bancaire actuel</span>
+              <input id="bank-balance" type="number" step="0.01" class="live-input" />
+            </label>
+            <div class="live-field">
+              <span class="live-label">Charges à venir</span>
+              <span id="charges-a-venir" class="live-value">0 €</span>
+            </div>
+            <div class="live-field">
+              <span class="live-label">Reste à vivre réel</span>
+              <span id="reste-a-vivre" class="live-value">0 €</span>
+            </div>
+          </div>
+          <div class="allocation-max">
+            <span class="live-label">Allocation journalière</span>
+            <span id="daily-allocation">0 €</span>
+          </div>
+        </section>
+
+        <section class="card">
+          <div class="card-header">
+            <h2>Revenus</h2>
+            <button id="add-income" type="button" class="add-row-btn">+ Ajouter</button>
+          </div>
+          <div id="income-list" class="rows"></div>
+        </section>
+
+        <div id="groups-container"></div>
+      </main>
+    </div>
+
+    <!-- Vue : Prévisions annuelles -->
+    <div id="view-previsions" class="view hidden">
+      <main class="content wide">
+        <h2 class="view-title">Prévisions sur 12 mois</h2>
+        <p class="view-subtitle">Modifiez un montant directement dans la grille : le mois correspondant est créé automatiquement si besoin.</p>
+        <div class="table-scroll">
+          <table id="forecast-table" class="forecast-table"></table>
+        </div>
+      </main>
+    </div>
+
+    <!-- Vue : Historique -->
+    <div id="view-historique" class="view hidden">
+      <main class="content wide">
+        <h2 class="view-title">Historique des mois</h2>
+        <div class="table-scroll">
+          <table class="history-table">
+            <thead>
+              <tr>
+                <th>Mois</th><th>Revenus</th><th>Régulières</th><th>Occasionnelles</th>
+                <th>Capital</th><th>Total dépenses</th><th>Reste à vivre</th>
+              </tr>
+            </thead>
+            <tbody id="history-body"></tbody>
+          </table>
+        </div>
+      </main>
+    </div>
+
+    <!-- Vue : Analyse budget -->
+    <div id="view-analyse" class="view hidden">
+      <main class="content">
+        <h2 class="view-title">Analyse — <span id="analyse-month-label"></span></h2>
+        <div class="charts-grid">
+          <section class="card chart-card">
+            <h3>Répartition globale</h3>
+            <canvas id="chart-pie"></canvas>
+          </section>
+          <section class="card chart-card">
+            <h3>Détail des charges fixes régulières</h3>
+            <canvas id="chart-bar"></canvas>
+          </section>
+          <section class="card chart-card chart-wide">
+            <h3>Évolution de l'épargne cumulée</h3>
+            <canvas id="chart-line"></canvas>
+          </section>
+        </div>
+      </main>
+    </div>
   </div>
 
   <script type="module" src="app.js"></script>
