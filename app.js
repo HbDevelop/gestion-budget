@@ -1,7 +1,7 @@
 import { firebaseConfig, AUTHORIZED_EMAILS } from "./firebase-config.js";
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js";
 import {
-  getAuth, GoogleAuthProvider, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged
+  getAuth, GoogleAuthProvider, signInWithPopup, signInWithRedirect, getRedirectResult, signOut, onAuthStateChanged
 } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js";
 import {
   getFirestore, doc, getDoc, setDoc, collection, getDocs, query, orderBy
@@ -116,15 +116,22 @@ const historyBody = $("#history-body");
 const backToMonthBtn = $("#back-to-month");
 
 // ---- Auth ----
-loginBtn.addEventListener("click", () => signInWithRedirect(auth, provider).catch((e) => {
-  alert("Connexion impossible : " + e.message);
-}));
+loginBtn.addEventListener("click", async () => {
+  try {
+    await signInWithPopup(auth, provider);
+  } catch (e) {
+    // Popup blocked or unavailable (common on mobile browsers): fall back to a full redirect.
+    if (e.code === "auth/popup-blocked" || e.code === "auth/operation-not-supported-in-this-environment") {
+      signInWithRedirect(auth, provider).catch((e2) => alert("Connexion impossible : " + e2.message));
+    } else if (e.code !== "auth/popup-closed-by-user" && e.code !== "auth/cancelled-popup-request") {
+      alert("Connexion impossible : " + e.message);
+    }
+  }
+});
 logoutBtn.addEventListener("click", () => signOut(auth));
 deniedLogoutBtn.addEventListener("click", () => signOut(auth));
 
-getRedirectResult(auth).catch((e) => {
-  if (e.code !== "auth/no-auth-event") console.error(e);
-});
+getRedirectResult(auth).catch((e) => console.error(e));
 
 onAuthStateChanged(auth, async (user) => {
   currentUser = user;
