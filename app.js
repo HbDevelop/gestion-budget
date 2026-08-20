@@ -26,7 +26,7 @@ const DEFAULT_CATALOG = () => ({
     { id: uid(), label: "Salaire", type: "income", retiredAt: null },
     { id: uid(), label: "Impôt", type: "income", retiredAt: null },
     { id: uid(), label: "Extra", type: "income", retiredAt: null },
-    { id: uid(), label: "Virement de l'épargne", type: "income", retiredAt: null },
+    { id: uid(), label: "Virement de l'épargne", type: "income", retiredAt: null, role: "epargne_out" },
     { id: uid(), label: "Crédit / Loyer", type: "regulieres", retiredAt: null },
     { id: uid(), label: "Essence", type: "regulieres", retiredAt: null },
     { id: uid(), label: "Transport en commun", type: "regulieres", retiredAt: null },
@@ -54,7 +54,7 @@ const DEFAULT_CATALOG = () => ({
     { id: uid(), label: "Vêtements", type: "occasionnelles", retiredAt: null },
     { id: uid(), label: "Vacances", type: "occasionnelles", retiredAt: null },
     { id: uid(), label: "Amendes", type: "occasionnelles", retiredAt: null },
-    { id: uid(), label: "Épargne", type: "capital", retiredAt: null },
+    { id: uid(), label: "Épargne", type: "capital", retiredAt: null, role: "epargne" },
     { id: uid(), label: "Investissement", type: "capital", retiredAt: null }
   ]
 });
@@ -650,8 +650,8 @@ async function renderAnalyse() {
 
   // Épargne cumulée = solde de départ + somme glissante de (Épargne du mois - Virement de
   // l'épargne du mois). L'Investissement n'entre pas en compte : c'est un poste distinct.
-  const epargneItem = catalog.items.find((it) => it.type === "capital" && it.label === "Épargne");
-  const virementItem = catalog.items.find((it) => it.type === "income" && it.label === "Virement de l'épargne");
+  const epargneItem = catalog.items.find((it) => it.role === "epargne");
+  const virementItem = catalog.items.find((it) => it.role === "epargne_out");
   const settings = await fetchSettings();
   const months = await fetchAllMonthsAsc();
   let cumul = settings.epargneBase || 0;
