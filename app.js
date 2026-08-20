@@ -134,7 +134,6 @@ let currentMonthId = monthId(new Date());
 let monthData = null;
 let catalog = null;
 let saveTimeout = null;
-let currentView = "suivi";
 let charts = { pie: null, pieAvg: null, line: null, investment: null };
 
 // ---- DOM ----
@@ -222,7 +221,6 @@ document.querySelectorAll(".nav-btn").forEach((btn) => {
 });
 
 async function switchView(view) {
-  currentView = view;
   document.querySelectorAll(".nav-btn").forEach((b) => b.classList.toggle("active", b.dataset.view === view));
   document.querySelectorAll(".view").forEach((v) => v.classList.add("hidden"));
   $(`#view-${view}`).classList.remove("hidden");
@@ -551,7 +549,6 @@ async function setForecastValue(targetMonthId, itemId, value, monthsByI) {
   data.values[itemId] = { amount: value, paid: prev.paid };
   await persistMonth(targetMonthId, { ...data, updatedAt: new Date().toISOString(), updatedBy: currentUser.email });
   await renderForecast();
-  if (targetMonthId === currentMonthId && currentView === "suivi") await loadMonth(currentMonthId);
 }
 
 async function addItem(type) {
@@ -612,7 +609,6 @@ async function removeItem(itemId, ids, monthsByI) {
   }
   await persistCatalog(catalog);
   await renderForecast();
-  if (affectedFuture.includes(currentMonthId) && currentView === "suivi") await loadMonth(currentMonthId);
 }
 
 // ---- Analyse budget (graphiques) ----
@@ -649,7 +645,9 @@ function pieOptions(dataset) {
 
 async function renderAnalyse() {
   analyseMonthLabel.textContent = monthLabel(currentMonthId);
-  const data = monthData || (await fetchMonth(currentMonthId)) || { values: {} };
+  // Toujours relire Firestore (plutôt que de réutiliser monthData) : un montant modifié
+  // depuis Prévisions ne met pas à jour l'état en mémoire de l'écran Suivi.
+  const data = (await fetchMonth(currentMonthId)) || { values: {} };
   const t = computeTotals(catalog, data);
   const settings = await fetchSettings();
   const months = await fetchAllMonthsAsc();
