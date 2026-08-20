@@ -325,16 +325,24 @@ function render() {
   renderTotals();
 }
 
+// Un poste à 0 € pour le mois affiché n'est pas montré dans Suivi (juste du bruit visuel) :
+// pour lui donner un montant, ça se fait dans Prévisions, qui liste toujours tous les postes actifs.
+function hasAmount(item) {
+  return !!(monthData.values[item.id] && monthData.values[item.id].amount);
+}
+
 function renderIncome() {
   incomeList.innerHTML = "";
-  catalog.items
-    .filter((it) => it.type === "income" && isActiveAt(it, currentMonthId))
-    .forEach((item) => incomeList.appendChild(buildSuiviRow(item)));
+  const items = catalog.items.filter((it) => it.type === "income" && isActiveAt(it, currentMonthId) && hasAmount(it));
+  $("#income-card").classList.toggle("hidden", !items.length);
+  items.forEach((item) => incomeList.appendChild(buildSuiviRow(item)));
 }
 
 function renderExpenseGroups() {
   groupsContainer.innerHTML = "";
   GROUPS.forEach((group) => {
+    const items = catalog.items.filter((it) => it.type === group.key && isActiveAt(it, currentMonthId) && hasAmount(it));
+    if (!items.length) return;
     const section = document.createElement("section");
     section.className = "card";
     section.innerHTML = `
@@ -343,9 +351,7 @@ function renderExpenseGroups() {
     `;
     groupsContainer.appendChild(section);
     const rowsEl = section.querySelector(".rows");
-    catalog.items
-      .filter((it) => it.type === group.key && isActiveAt(it, currentMonthId))
-      .forEach((item) => rowsEl.appendChild(buildSuiviRow(item)));
+    items.forEach((item) => rowsEl.appendChild(buildSuiviRow(item)));
   });
 }
 
