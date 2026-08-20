@@ -43,7 +43,7 @@ const DEFAULT_TEMPLATE = () => ({
     { id: uid(), label: "Électroménager", amount: 0, paid: false, group: "occasionnelles" },
     { id: uid(), label: "Échéancier", amount: 0, paid: false, group: "occasionnelles" },
     { id: uid(), label: "Billet de transport", amount: 0, paid: false, group: "occasionnelles" },
-    { id: uid(), label: "Sorties / Loisirs", amount: 0, paid: false, group: "occasionnelles" },
+    { id: uid(), label: "Théatre", amount: 0, paid: false, group: "occasionnelles" },
     { id: uid(), label: "Sport / Club", amount: 0, paid: false, group: "occasionnelles" },
     { id: uid(), label: "Réparations / Entretien voiture", amount: 0, paid: false, group: "occasionnelles" },
     { id: uid(), label: "Santé (non remboursé)", amount: 0, paid: false, group: "occasionnelles" },
