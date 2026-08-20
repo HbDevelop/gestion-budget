@@ -569,27 +569,45 @@ async function renameItem(itemId, newLabel) {
 async function removeItem(itemId, ids, monthsByI) {
   const item = catalog.items.find((it) => it.id === itemId);
   if (!item) return;
-  const affected = ids.filter((id) => {
+
+  const affectedFuture = ids.filter((id) => {
     const v = monthsByI[id] && monthsByI[id].values && monthsByI[id].values[itemId];
     return v && v.amount;
   });
-  if (affected.length) {
-    const detail = affected.map((id) => `${monthLabel(id)} (${euros(monthsByI[id].values[itemId].amount)})`).join(", ");
-    const ok = confirm(`"${item.label}" a un montant prévu sur : ${detail}.\n\nLe supprimer remettra ces montants à 0 (l'historique passé n'est pas affecté). Continuer ?`);
+
+  // S'il n'a jamais eu de montant sur un mois passé, autant le supprimer complètement
+  // plutôt que de laisser une ligne à 0 € traîner dans l'Historique.
+  const currentId = monthId(new Date());
+  const pastMonths = (await fetchAllMonthsAsc()).filter((m) => m.id < currentId);
+  const hasHistory = pastMonths.some((m) => m.data.values && m.data.values[itemId] && m.data.values[itemId].amount);
+
+  if (affectedFuture.length) {
+    const detail = affectedFuture.map((id) => `${monthLabel(id)} (${euros(monthsByI[id].values[itemId].amount)})`).join(", ");
+    const tail = hasHistory ? "(l'historique passé n'est pas affecté)" : "Il n'a jamais eu de montant dans le passé, il sera donc supprimé entièrement, y compris de l'Historique";
+    const ok = confirm(`"${item.label}" a un montant prévu sur : ${detail}.\n\nLe supprimer remettra ces montants à 0. ${tail}. Continuer ?`);
     if (!ok) return;
-  } else {
+  } else if (hasHistory) {
     const ok = confirm(`Supprimer "${item.label}" ? Il restera visible dans l'Historique pour les mois passés.`);
     if (!ok) return;
+  } else {
+    const ok = confirm(`Supprimer "${item.label}" ? Il n'a jamais eu de montant, il sera donc supprimé entièrement (y compris de l'Historique).`);
+    if (!ok) return;
   }
-  item.retiredAt = monthId(new Date());
-  await persistCatalog(catalog);
-  for (const id of affected) {
+
+  for (const id of affectedFuture) {
     const data = monthsByI[id];
     data.values[itemId] = { ...data.values[itemId], amount: 0 };
     await persistMonth(id, { ...data, updatedAt: new Date().toISOString(), updatedBy: currentUser.email });
   }
+
+  if (hasHistory) {
+    item.retiredAt = currentId;
+  } else {
+    catalog.items = catalog.items.filter((it) => it.id !== itemId);
+  }
+  await persistCatalog(catalog);
   await renderForecast();
-  if (affected.includes(currentMonthId) && currentView === "suivi") await loadMonth(currentMonthId);
+  if (affectedFuture.includes(currentMonthId) && currentView === "suivi") await loadMonth(currentMonthId);
 }
 
 // ---- Analyse budget (graphiques) ----
