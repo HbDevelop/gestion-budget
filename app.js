@@ -55,7 +55,7 @@ const DEFAULT_CATALOG = () => ({
     { id: uid(), label: "Vacances", type: "occasionnelles", retiredAt: null },
     { id: uid(), label: "Amendes", type: "occasionnelles", retiredAt: null },
     { id: uid(), label: "Épargne", type: "capital", retiredAt: null, role: "epargne" },
-    { id: uid(), label: "Investissement", type: "capital", retiredAt: null }
+    { id: uid(), label: "Investissement", type: "capital", retiredAt: null, role: "investissement" }
   ]
 });
 
@@ -135,7 +135,7 @@ let monthData = null;
 let catalog = null;
 let saveTimeout = null;
 let currentView = "suivi";
-let charts = { pie: null, bar: null, line: null };
+let charts = { pie: null, bar: null, line: null, investment: null };
 
 // ---- DOM ----
 const $ = (sel) => document.querySelector(sel);
@@ -668,6 +668,26 @@ async function renderAnalyse() {
   charts.line = new Chart($("#chart-line"), {
     type: "line",
     data: { labels, datasets: [{ label: "Épargne cumulée", data: values, borderColor: "#2563eb", tension: 0.3 }] },
+    options: { plugins: { legend: { display: false } } }
+  });
+
+  // Investissement cumulé = solde de départ (à partir du mois configuré) + somme glissante
+  // du poste Investissement, sans soustraction (pas de "retrait d'investissement" suivi).
+  const investissementItem = catalog.items.find((it) => it.role === "investissement");
+  const invStart = settings.investissementStart || "2026-08";
+  let invCumul = settings.investissementBase || 0;
+  const invLabels = [];
+  const invValues = [];
+  months.filter(({ id }) => id >= invStart).forEach(({ id, data: d }) => {
+    const values_ = d.values || {};
+    const amount = (investissementItem && values_[investissementItem.id] && values_[investissementItem.id].amount) || 0;
+    invCumul += amount;
+    invLabels.push(monthLabelShort(id));
+    invValues.push(invCumul);
+  });
+  charts.investment = new Chart($("#chart-investment"), {
+    type: "line",
+    data: { labels: invLabels, datasets: [{ label: "Investissement cumulé", data: invValues, borderColor: "#059669", tension: 0.3 }] },
     options: { plugins: { legend: { display: false } } }
   });
 }
