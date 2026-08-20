@@ -16,3 +16,9 @@ export const AUTHORIZED_EMAILS = [
   "boudriga.habib@gmail.com",
   "elghoulmarwaem@gmail.com"
 ];
+
+// ID client OAuth Web du provider Google (Firebase Auth > Sign-in method > Google >
+// Configuration du SDK Web). Utilisé par Google Identity Services pour la connexion :
+// on évite ainsi le relais par iframe tierce de Firebase (gestion-budget-3a2f5.firebaseapp.com),
+// souvent bloqué par les navigateurs qui restreignent le stockage/cookies tiers.
+export const GOOGLE_CLIENT_ID = "424863797938-jthv0vqgobm6php72mpiuuqqh11b2a8q.apps.googleusercontent.com";
