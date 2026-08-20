@@ -147,8 +147,6 @@ const logoutBtn = $("#logout-btn");
 const deniedLogoutBtn = $("#denied-logout-btn");
 const userLabel = $("#user-label");
 const monthTitle = $("#month-title");
-const prevMonthBtn = $("#prev-month");
-const nextMonthBtn = $("#next-month");
 const saveStatus = $("#save-status");
 const groupsContainer = $("#groups-container");
 const incomeList = $("#income-list");
@@ -424,10 +422,6 @@ function escapeHtml(str) {
 function escapeAttr(str) {
   return str.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
 }
-
-// ---- Navigation mois ----
-prevMonthBtn.addEventListener("click", () => loadMonth(addMonths(currentMonthId, -1)));
-nextMonthBtn.addEventListener("click", () => loadMonth(addMonths(currentMonthId, 1)));
 
 // ---- Grille partagée (postes en lignes, mois en colonnes) ----
 // items : liste de postes catalogue déjà filtrée par l'appelant (actifs pour Prévisions,
