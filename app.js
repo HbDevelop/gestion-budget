@@ -134,7 +134,7 @@ let currentMonthId = monthId(new Date());
 let monthData = null;
 let catalog = null;
 let saveTimeout = null;
-let charts = { pie: null, pieAvg: null, line: null, investment: null };
+let charts = { pie: null, pieAvg: null, line: null, investment: null, balance: null, occTop: null };
 
 // ---- DOM ----
 const $ = (sel) => document.querySelector(sel);
@@ -719,5 +719,51 @@ async function renderAnalyse() {
     type: "line",
     data: { labels: invLabels, datasets: [{ label: "Investissement cumulé", data: invValues, borderColor: "#059669", tension: 0.3 }] },
     options: { plugins: { legend: { display: false } } }
+  });
+
+  // Reste à vivre de chaque mois (pas cumulé) : la tendance mois après mois, avec les mois
+  // en négatif mis en évidence pour repérer vite les périodes tendues.
+  const balanceLabels = [];
+  const balanceValues = [];
+  months.forEach(({ id, data: d }) => {
+    balanceLabels.push(monthLabelShort(id));
+    balanceValues.push(computeTotals(catalog, d).balance);
+  });
+  charts.balance = new Chart($("#chart-balance"), {
+    type: "line",
+    data: {
+      labels: balanceLabels,
+      datasets: [{
+        label: "Reste à vivre",
+        data: balanceValues,
+        borderColor: "#7c3aed",
+        tension: 0.3,
+        pointBackgroundColor: balanceValues.map((v) => (v < 0 ? "#dc2626" : "#7c3aed")),
+        pointRadius: 4
+      }]
+    },
+    options: { plugins: { legend: { display: false } } }
+  });
+
+  // Classement des postes occasionnels par coût total cumulé sur les mois passés + en cours
+  // (les mois futurs ne sont que des prévisions, pas des dépenses réelles).
+  const occItems = catalog.items.filter((it) => it.type === "occasionnelles");
+  const occTotals = {};
+  occItems.forEach((it) => { occTotals[it.id] = 0; });
+  months.filter(({ id }) => id <= currentMonthId).forEach(({ data: d }) => {
+    const values_ = d.values || {};
+    occItems.forEach((it) => { occTotals[it.id] += (values_[it.id] && values_[it.id].amount) || 0; });
+  });
+  const occRanked = occItems
+    .map((it) => ({ label: it.label, total: occTotals[it.id] }))
+    .filter((r) => r.total > 0)
+    .sort((a, b) => b.total - a.total);
+  charts.occTop = new Chart($("#chart-occ-top"), {
+    type: "bar",
+    data: {
+      labels: occRanked.map((r) => r.label),
+      datasets: [{ label: "Total", data: occRanked.map((r) => r.total), backgroundColor: "#f59e0b" }]
+    },
+    options: { indexAxis: "y", plugins: { legend: { display: false } } }
   });
 }
