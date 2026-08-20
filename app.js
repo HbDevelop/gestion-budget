@@ -238,6 +238,11 @@ async function fetchCatalog() {
   return snap.exists() ? snap.data() : null;
 }
 
+async function fetchSettings() {
+  const snap = await getDoc(doc(db, "meta", "settings"));
+  return snap.exists() ? snap.data() : {};
+}
+
 async function persistCatalog(cat) {
   await setDoc(doc(db, "meta", "catalog"), cat);
 }
@@ -643,13 +648,20 @@ async function renderAnalyse() {
     options: { plugins: { legend: { display: false } }, scales: { x: { ticks: { autoSkip: false, maxRotation: 60, minRotation: 30 } } } }
   });
 
+  // Épargne cumulée = solde de départ + somme glissante de (Épargne du mois - Virement de
+  // l'épargne du mois). L'Investissement n'entre pas en compte : c'est un poste distinct.
+  const epargneItem = catalog.items.find((it) => it.type === "capital" && it.label === "Épargne");
+  const virementItem = catalog.items.find((it) => it.type === "income" && it.label === "Virement de l'épargne");
+  const settings = await fetchSettings();
   const months = await fetchAllMonthsAsc();
-  let cumul = 0;
+  let cumul = settings.epargneBase || 0;
   const labels = [];
   const values = [];
   months.forEach(({ id, data: d }) => {
-    const dt = computeTotals(catalog, d);
-    cumul += dt.byGroup.capital;
+    const values_ = d.values || {};
+    const epargne = (epargneItem && values_[epargneItem.id] && values_[epargneItem.id].amount) || 0;
+    const virement = (virementItem && values_[virementItem.id] && values_[virementItem.id].amount) || 0;
+    cumul += epargne - virement;
     labels.push(monthLabelShort(id));
     values.push(cumul);
   });
