@@ -147,7 +147,7 @@ const resteAVivreEl = $("#reste-a-vivre");
 const dailyAllocationEl = $("#daily-allocation");
 const emptyMonthBanner = $("#empty-month-banner");
 const createMonthBtn = $("#create-month-btn");
-const historyBody = $("#history-body");
+const historyTable = $("#history-table");
 const forecastTable = $("#forecast-table");
 const analyseMonthLabel = $("#analyse-month-label");
 
@@ -409,28 +409,74 @@ addIncomeBtn.addEventListener("click", () => {
   scheduleSave();
 });
 
-// ---- Historique ----
-async function renderHistory() {
-  historyBody.innerHTML = `<tr><td colspan="7">Chargement…</td></tr>`;
-  const months = (await fetchAllMonthsAsc()).reverse();
-  historyBody.innerHTML = "";
-  months.forEach(({ id, data }) => {
-    const t = computeTotals(data);
-    const tr = document.createElement("tr");
-    tr.innerHTML = `
-      <td>${monthLabel(id)}</td>
-      <td>${euros(t.totalIncome)}</td>
-      <td>${euros(t.byGroup.regulieres)}</td>
-      <td>${euros(t.byGroup.occasionnelles)}</td>
-      <td>${euros(t.byGroup.capital)}</td>
-      <td>${euros(t.totalExpenses)}</td>
-      <td class="${t.balance < 0 ? "negative" : ""}">${euros(t.balance)}</td>
-    `;
-    historyBody.appendChild(tr);
+// ---- Grille partagée (postes en lignes, mois en colonnes) ----
+// Utilisée en mode éditable pour les Prévisions et en lecture seule pour l'Historique.
+function buildMonthGrid(table, ids, monthsByI, editable) {
+  const base = ids.map((id) => monthsByI[id]).reverse().find((d) => d) || DEFAULT_TEMPLATE();
+  const incomeRows = base.income.map((r) => r.label);
+  const expenseRowsByGroup = {};
+  GROUPS.forEach((g) => { expenseRowsByGroup[g.key] = base.expenses.filter((e) => e.group === g.key).map((e) => e.label); });
+
+  let html = "<thead><tr><th>Poste</th>";
+  ids.forEach((id) => { html += `<th>${monthLabelShort(id)}</th>`; });
+  html += "</tr></thead><tbody>";
+
+  html += `<tr class="section-row"><td colspan="${ids.length + 1}">Revenus</td></tr>`;
+  incomeRows.forEach((label) => { html += gridRow(label, "income", null, ids, monthsByI, editable); });
+  html += gridTotalRow("Sous-total revenus", ids, monthsByI, (t) => t.totalIncome);
+
+  GROUPS.forEach((g) => {
+    html += `<tr class="section-row"><td colspan="${ids.length + 1}">${g.label}</td></tr>`;
+    expenseRowsByGroup[g.key].forEach((label) => { html += gridRow(label, "expense", g.key, ids, monthsByI, editable); });
+    html += gridTotalRow(`Sous-total ${g.label.toLowerCase()}`, ids, monthsByI, (t) => t.byGroup[g.key]);
   });
-  if (!historyBody.children.length) {
-    historyBody.innerHTML = `<tr><td colspan="7">Aucun mois enregistré pour l'instant.</td></tr>`;
+
+  html += gridTotalRow("Total dépenses", ids, monthsByI, (t) => t.totalExpenses, true);
+  html += gridTotalRow("Reste à vivre", ids, monthsByI, (t) => t.balance, true);
+  html += "</tbody>";
+  table.innerHTML = html;
+}
+
+function gridRow(label, kind, group, ids, monthsByI, editable) {
+  let row = `<tr><td>${escapeHtml(label)}</td>`;
+  ids.forEach((id) => {
+    const data = monthsByI[id];
+    const list = kind === "income" ? data?.income : data?.expenses?.filter((e) => e.group === group);
+    const item = list?.find((r) => r.label === label);
+    const value = item ? item.amount : 0;
+    if (editable) {
+      row += `<td><input class="forecast-input" type="number" step="0.01" value="${value}"
+        data-month-id-attr="${id}" data-label="${escapeAttr(label)}" data-kind="${kind}" data-group="${group || ""}" /></td>`;
+    } else {
+      row += `<td>${euros(value)}</td>`;
+    }
+  });
+  return row + "</tr>";
+}
+
+function gridTotalRow(label, ids, monthsByI, getValue, strong) {
+  let row = `<tr class="${strong ? "total-row" : "subtotal-row"}"><td>${label}</td>`;
+  ids.forEach((id) => {
+    const data = monthsByI[id];
+    const t = data ? computeTotals(data) : { totalIncome: 0, totalExpenses: 0, balance: 0, byGroup: { regulieres: 0, occasionnelles: 0, capital: 0 } };
+    row += `<td>${euros(getValue(t))}</td>`;
+  });
+  return row + "</tr>";
+}
+
+// ---- Historique (grille en lecture seule des mois passés) ----
+async function renderHistory() {
+  historyTable.innerHTML = `<tr><td>Chargement…</td></tr>`;
+  const currentId = monthId(new Date());
+  const past = (await fetchAllMonthsAsc()).filter(({ id }) => id < currentId);
+  if (!past.length) {
+    historyTable.innerHTML = `<tr><td>Aucun mois passé enregistré pour l'instant.</td></tr>`;
+    return;
   }
+  const ids = past.map((m) => m.id);
+  const monthsByI = {};
+  past.forEach(({ id, data }) => { monthsByI[id] = data; });
+  buildMonthGrid(historyTable, ids, monthsByI, false);
 }
 
 // ---- Prévisions annuelles (grille éditable sur 12 mois) ----
@@ -446,30 +492,7 @@ async function renderForecast() {
   const monthsByI = {};
   ids.forEach((id, i) => { monthsByI[id] = docs[i]; });
 
-  // Base des lignes : le premier mois du champ qui a des données, sinon le template par défaut.
-  const base = docs.find((d) => d) || DEFAULT_TEMPLATE();
-  const incomeRows = base.income.map((r) => r.label);
-  const expenseRowsByGroup = {};
-  GROUPS.forEach((g) => { expenseRowsByGroup[g.key] = base.expenses.filter((e) => e.group === g.key).map((e) => e.label); });
-
-  let html = "<thead><tr><th>Poste</th>";
-  ids.forEach((id) => { html += `<th>${monthLabelShort(id)}</th>`; });
-  html += "</tr></thead><tbody>";
-
-  html += `<tr class="section-row"><td colspan="${ids.length + 1}">Revenus</td></tr>`;
-  incomeRows.forEach((label) => { html += forecastRow(label, "income", null, ids, monthsByI); });
-  html += forecastTotalRow("Sous-total revenus", ids, monthsByI, (t) => t.totalIncome);
-
-  GROUPS.forEach((g) => {
-    html += `<tr class="section-row"><td colspan="${ids.length + 1}">${g.label}</td></tr>`;
-    expenseRowsByGroup[g.key].forEach((label) => { html += forecastRow(label, "expense", g.key, ids, monthsByI); });
-    html += forecastTotalRow(`Sous-total ${g.label.toLowerCase()}`, ids, monthsByI, (t) => t.byGroup[g.key]);
-  });
-
-  html += forecastTotalRow("Total dépenses", ids, monthsByI, (t) => t.totalExpenses, true);
-  html += forecastTotalRow("Reste à vivre", ids, monthsByI, (t) => t.balance, true);
-  html += "</tbody>";
-  forecastTable.innerHTML = html;
+  buildMonthGrid(forecastTable, ids, monthsByI, true);
 
   forecastTable.querySelectorAll(".forecast-input").forEach((input) => {
     input.addEventListener("change", async () => {
@@ -478,29 +501,6 @@ async function renderForecast() {
       await setForecastValue(monthIdAttr, label, kind, group, value, monthsByI);
     });
   });
-}
-
-function forecastRow(label, kind, group, ids, monthsByI) {
-  let row = `<tr><td>${escapeHtml(label)}</td>`;
-  ids.forEach((id) => {
-    const data = monthsByI[id];
-    const list = kind === "income" ? data?.income : data?.expenses?.filter((e) => e.group === group);
-    const item = list?.find((r) => r.label === label);
-    const value = item ? item.amount : 0;
-    row += `<td><input class="forecast-input" type="number" step="0.01" value="${value}"
-      data-month-id-attr="${id}" data-label="${escapeAttr(label)}" data-kind="${kind}" data-group="${group || ""}" /></td>`;
-  });
-  return row + "</tr>";
-}
-
-function forecastTotalRow(label, ids, monthsByI, getValue, strong) {
-  let row = `<tr class="${strong ? "total-row" : "subtotal-row"}"><td>${label}</td>`;
-  ids.forEach((id) => {
-    const data = monthsByI[id];
-    const t = data ? computeTotals(data) : { totalIncome: 0, totalExpenses: 0, balance: 0, byGroup: { regulieres: 0, occasionnelles: 0, capital: 0 } };
-    row += `<td>${euros(getValue(t))}</td>`;
-  });
-  return row + "</tr>";
 }
 
 async function setForecastValue(targetMonthId, label, kind, group, value, monthsByI) {
