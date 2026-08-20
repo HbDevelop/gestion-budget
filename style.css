@@ -210,7 +210,12 @@ body {
 .allocation-max span:last-child { font-size: 32px; font-weight: 700; color: var(--primary); }
 .allocation-max span:last-child.negative { color: var(--danger); }
 
-.table-scroll { overflow-x: auto; border-radius: var(--radius); box-shadow: var(--shadow); }
+.table-scroll {
+  overflow: auto;
+  max-height: 75vh;
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+}
 
 .forecast-table {
   border-collapse: collapse;
