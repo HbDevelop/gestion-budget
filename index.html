@@ -1,0 +1,123 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Gestion Budget</title>
+  <link rel="stylesheet" href="style.css" />
+</head>
+<body>
+
+  <!-- Écran de connexion -->
+  <div id="login-screen" class="screen centered">
+    <div class="login-card">
+      <h1>💶 Gestion Budget</h1>
+      <p>Accès privé et familial.</p>
+      <button id="login-btn" class="btn primary">Se connecter avec Google</button>
+    </div>
+  </div>
+
+  <!-- Écran d'accès refusé -->
+  <div id="denied-screen" class="screen centered hidden">
+    <div class="login-card">
+      <h1>⛔ Accès refusé</h1>
+      <p>Le compte <strong id="denied-email"></strong> n'est pas autorisé à accéder à cette application.</p>
+      <button id="denied-logout-btn" class="btn">Se déconnecter</button>
+    </div>
+  </div>
+
+  <!-- App principale -->
+  <div id="app-screen" class="screen hidden">
+    <header class="topbar">
+      <h1>💶 Gestion Budget</h1>
+      <div class="topbar-actions">
+        <span id="user-label" class="user-label"></span>
+        <button id="history-btn" class="btn small">Historique</button>
+        <button id="logout-btn" class="btn small">Déconnexion</button>
+      </div>
+    </header>
+
+    <div class="month-nav">
+      <button id="prev-month" class="btn small" aria-label="Mois précédent">←</button>
+      <h2 id="month-title"></h2>
+      <button id="next-month" class="btn small" aria-label="Mois suivant">→</button>
+      <span id="save-status" class="save-status"></span>
+    </div>
+
+    <div id="empty-month-banner" class="banner hidden">
+      <p>Ce mois n'a pas encore de données.</p>
+      <button id="create-month-btn" class="btn primary">Créer ce mois à partir du précédent</button>
+    </div>
+
+    <main class="content">
+      <section class="summary">
+        <div class="summary-card">
+          <span class="summary-label">Revenus</span>
+          <span id="total-income" class="summary-value">0 €</span>
+        </div>
+        <div class="summary-card">
+          <span class="summary-label">Dépenses</span>
+          <span id="total-expenses" class="summary-value">0 €</span>
+        </div>
+        <div class="summary-card">
+          <span class="summary-label">Solde</span>
+          <span id="balance" class="summary-value">0 €</span>
+        </div>
+        <div class="summary-card highlight">
+          <span class="summary-label">Allocation / jour restant</span>
+          <span id="daily-allocation" class="summary-value">0 €</span>
+        </div>
+      </section>
+
+      <section class="card">
+        <div class="card-header">
+          <h2>Revenus</h2>
+          <button id="add-income" type="button" class="add-row-btn">+ Ajouter</button>
+        </div>
+        <div id="income-list" class="rows"></div>
+      </section>
+
+      <div id="groups-container"></div>
+
+      <section class="card">
+        <div class="card-header">
+          <h2>Épargne</h2>
+        </div>
+        <div class="savings-grid">
+          <label>Disponible en début de mois
+            <input id="savings-disponible" type="number" step="0.01" />
+          </label>
+          <label>Dépôts
+            <input id="savings-depots" type="number" step="0.01" />
+          </label>
+          <label>Retraits
+            <input id="savings-retraits" type="number" step="0.01" />
+          </label>
+          <div class="savings-total">
+            <span>Total épargne</span>
+            <span id="savings-total">0 €</span>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+
+  <!-- Historique -->
+  <div id="history-screen" class="screen hidden">
+    <header class="topbar">
+      <h1>📊 Historique</h1>
+      <button id="back-to-month" class="btn small">← Retour</button>
+    </header>
+    <main class="content">
+      <table class="history-table">
+        <thead>
+          <tr><th>Mois</th><th>Revenus</th><th>Dépenses</th><th>Solde</th></tr>
+        </thead>
+        <tbody id="history-body"></tbody>
+      </table>
+    </main>
+  </div>
+
+  <script type="module" src="app.js"></script>
+</body>
+</html>
