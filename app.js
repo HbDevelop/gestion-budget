@@ -11,51 +11,52 @@ const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
 
+// Un poste (revenu ou dépense) vit dans un catalogue partagé (doc meta/catalog) : ajouter,
+// supprimer ou renommer un poste se fait une seule fois et se répercute sur tous les mois
+// (Suivi, Prévisions, Historique), au lieu d'être dupliqué dans chaque mois séparément.
 const GROUPS = [
   { key: "regulieres", label: "Charges fixes régulières" },
   { key: "occasionnelles", label: "Charges fixes occasionnelles" },
   { key: "capital", label: "Capital et réserves" }
 ];
+const SECTIONS = [{ key: "income", label: "Revenus" }, ...GROUPS];
 
-const DEFAULT_TEMPLATE = () => ({
-  income: [
-    { id: uid(), label: "Salaire", amount: 0 },
-    { id: uid(), label: "Impôt", amount: 0 },
-    { id: uid(), label: "Extra", amount: 0 },
-    { id: uid(), label: "Virement de l'épargne", amount: 0 }
-  ],
-  expenses: [
-    { id: uid(), label: "Crédit / Loyer", amount: 0, paid: false, group: "regulieres" },
-    { id: uid(), label: "Essence", amount: 0, paid: false, group: "regulieres" },
-    { id: uid(), label: "Transport en commun", amount: 0, paid: false, group: "regulieres" },
-    { id: uid(), label: "Crèche / École", amount: 0, paid: false, group: "regulieres" },
-    { id: uid(), label: "Forfait mobile", amount: 0, paid: false, group: "regulieres" },
-    { id: uid(), label: "Box internet", amount: 0, paid: false, group: "regulieres" },
-    { id: uid(), label: "Virement enfants", amount: 0, paid: false, group: "regulieres" },
-    { id: uid(), label: "Abonnements", amount: 0, paid: false, group: "regulieres" },
-    { id: uid(), label: "Assurance électroménager", amount: 0, paid: false, group: "regulieres" },
-    { id: uid(), label: "Assurance habitation", amount: 0, paid: false, group: "regulieres" },
-    { id: uid(), label: "Assurance voiture", amount: 0, paid: false, group: "regulieres" },
-    { id: uid(), label: "Mutuelle complémentaire", amount: 0, paid: false, group: "regulieres" },
-    { id: uid(), label: "Banque", amount: 0, paid: false, group: "regulieres" },
-    { id: uid(), label: "Charges copropriété", amount: 0, paid: false, group: "regulieres" },
-    { id: uid(), label: "Assurance appareil", amount: 0, paid: false, group: "regulieres" },
-    { id: uid(), label: "Électroménager", amount: 0, paid: false, group: "occasionnelles" },
-    { id: uid(), label: "Échéancier", amount: 0, paid: false, group: "occasionnelles" },
-    { id: uid(), label: "Billet de transport", amount: 0, paid: false, group: "occasionnelles" },
-    { id: uid(), label: "Théatre", amount: 0, paid: false, group: "occasionnelles" },
-    { id: uid(), label: "Sport / Club", amount: 0, paid: false, group: "occasionnelles" },
-    { id: uid(), label: "Réparations / Entretien voiture", amount: 0, paid: false, group: "occasionnelles" },
-    { id: uid(), label: "Santé (non remboursé)", amount: 0, paid: false, group: "occasionnelles" },
-    { id: uid(), label: "Billet d'avion", amount: 0, paid: false, group: "occasionnelles" },
-    { id: uid(), label: "Impôts (ponctuels)", amount: 0, paid: false, group: "occasionnelles" },
-    { id: uid(), label: "Vêtements", amount: 0, paid: false, group: "occasionnelles" },
-    { id: uid(), label: "Vacances", amount: 0, paid: false, group: "occasionnelles" },
-    { id: uid(), label: "Amendes", amount: 0, paid: false, group: "occasionnelles" },
-    { id: uid(), label: "Épargne", amount: 0, paid: false, group: "capital" },
-    { id: uid(), label: "Investissement", amount: 0, paid: false, group: "capital" }
-  ],
-  bankBalance: 0
+const DEFAULT_CATALOG = () => ({
+  items: [
+    { id: uid(), label: "Salaire", type: "income", retiredAt: null },
+    { id: uid(), label: "Impôt", type: "income", retiredAt: null },
+    { id: uid(), label: "Extra", type: "income", retiredAt: null },
+    { id: uid(), label: "Virement de l'épargne", type: "income", retiredAt: null },
+    { id: uid(), label: "Crédit / Loyer", type: "regulieres", retiredAt: null },
+    { id: uid(), label: "Essence", type: "regulieres", retiredAt: null },
+    { id: uid(), label: "Transport en commun", type: "regulieres", retiredAt: null },
+    { id: uid(), label: "Crèche / École", type: "regulieres", retiredAt: null },
+    { id: uid(), label: "Forfait mobile", type: "regulieres", retiredAt: null },
+    { id: uid(), label: "Box internet", type: "regulieres", retiredAt: null },
+    { id: uid(), label: "Virement enfants", type: "regulieres", retiredAt: null },
+    { id: uid(), label: "Abonnements", type: "regulieres", retiredAt: null },
+    { id: uid(), label: "Assurance électroménager", type: "regulieres", retiredAt: null },
+    { id: uid(), label: "Assurance habitation", type: "regulieres", retiredAt: null },
+    { id: uid(), label: "Assurance voiture", type: "regulieres", retiredAt: null },
+    { id: uid(), label: "Mutuelle complémentaire", type: "regulieres", retiredAt: null },
+    { id: uid(), label: "Banque", type: "regulieres", retiredAt: null },
+    { id: uid(), label: "Charges copropriété", type: "regulieres", retiredAt: null },
+    { id: uid(), label: "Assurance appareil", type: "regulieres", retiredAt: null },
+    { id: uid(), label: "Électroménager", type: "occasionnelles", retiredAt: null },
+    { id: uid(), label: "Échéancier", type: "occasionnelles", retiredAt: null },
+    { id: uid(), label: "Billet de transport", type: "occasionnelles", retiredAt: null },
+    { id: uid(), label: "Théatre", type: "occasionnelles", retiredAt: null },
+    { id: uid(), label: "Sport / Club", type: "occasionnelles", retiredAt: null },
+    { id: uid(), label: "Réparations / Entretien voiture", type: "occasionnelles", retiredAt: null },
+    { id: uid(), label: "Santé (non remboursé)", type: "occasionnelles", retiredAt: null },
+    { id: uid(), label: "Billet d'avion", type: "occasionnelles", retiredAt: null },
+    { id: uid(), label: "Impôts (ponctuels)", type: "occasionnelles", retiredAt: null },
+    { id: uid(), label: "Vêtements", type: "occasionnelles", retiredAt: null },
+    { id: uid(), label: "Vacances", type: "occasionnelles", retiredAt: null },
+    { id: uid(), label: "Amendes", type: "occasionnelles", retiredAt: null },
+    { id: uid(), label: "Épargne", type: "capital", retiredAt: null },
+    { id: uid(), label: "Investissement", type: "capital", retiredAt: null }
+  ]
 });
 
 function uid() {
@@ -100,16 +101,30 @@ function euros(n) {
   return (n || 0).toLocaleString("fr-FR", { style: "currency", currency: "EUR" });
 }
 
-function computeTotals(data) {
-  const totalIncome = data.income.reduce((s, r) => s + (r.amount || 0), 0);
-  const byGroup = {};
-  GROUPS.forEach((g) => {
-    byGroup[g.key] = data.expenses.filter((e) => e.group === g.key).reduce((s, r) => s + (r.amount || 0), 0);
+// Un poste est actif pour un mois donné s'il n'a jamais été retiré, ou s'il a été retiré
+// après ce mois (permet de garder les postes retirés visibles dans l'historique passé).
+function isActiveAt(item, monthIdStr) {
+  return !item.retiredAt || monthIdStr < item.retiredAt;
+}
+
+function computeTotals(cat, data) {
+  const values = (data && data.values) || {};
+  let totalIncome = 0;
+  const byGroup = { regulieres: 0, occasionnelles: 0, capital: 0 };
+  let chargesAVenir = 0;
+  cat.items.forEach((item) => {
+    const v = values[item.id];
+    const amount = (v && v.amount) || 0;
+    if (item.type === "income") {
+      totalIncome += amount;
+    } else {
+      byGroup[item.type] = (byGroup[item.type] || 0) + amount;
+      if (!v || !v.paid) chargesAVenir += amount;
+    }
   });
-  const totalExpenses = GROUPS.reduce((s, g) => s + byGroup[g.key], 0);
+  const totalExpenses = byGroup.regulieres + byGroup.occasionnelles + byGroup.capital;
   const balance = totalIncome - totalExpenses;
-  const chargesAVenir = data.expenses.filter((e) => !e.paid).reduce((s, r) => s + (r.amount || 0), 0);
-  const resteAVivreReel = (data.bankBalance || 0) - chargesAVenir;
+  const resteAVivreReel = ((data && data.bankBalance) || 0) - chargesAVenir;
   return { totalIncome, byGroup, totalExpenses, balance, chargesAVenir, resteAVivreReel };
 }
 
@@ -117,6 +132,7 @@ function computeTotals(data) {
 let currentUser = null;
 let currentMonthId = monthId(new Date());
 let monthData = null;
+let catalog = null;
 let saveTimeout = null;
 let currentView = "suivi";
 let charts = { pie: null, bar: null, line: null };
@@ -136,7 +152,6 @@ const nextMonthBtn = $("#next-month");
 const saveStatus = $("#save-status");
 const groupsContainer = $("#groups-container");
 const incomeList = $("#income-list");
-const addIncomeBtn = $("#add-income");
 const totalIncomeEl = $("#total-income");
 const totalExpensesEl = $("#total-expenses");
 const balanceEl = $("#balance");
@@ -195,6 +210,11 @@ onAuthStateChanged(auth, async (user) => {
   }
   userLabel.textContent = user.email;
   appShell.classList.remove("hidden");
+  catalog = await fetchCatalog();
+  if (!catalog) {
+    catalog = DEFAULT_CATALOG();
+    await persistCatalog(catalog);
+  }
   await loadMonth(currentMonthId);
 });
 
@@ -208,12 +228,23 @@ async function switchView(view) {
   document.querySelectorAll(".nav-btn").forEach((b) => b.classList.toggle("active", b.dataset.view === view));
   document.querySelectorAll(".view").forEach((v) => v.classList.add("hidden"));
   $(`#view-${view}`).classList.remove("hidden");
+  if (view === "suivi") await loadMonth(currentMonthId);
   if (view === "historique") await renderHistory();
   if (view === "previsions") await renderForecast();
   if (view === "analyse") await renderAnalyse();
 }
 
-// ---- Firestore ----
+// ---- Firestore : catalogue de postes ----
+async function fetchCatalog() {
+  const snap = await getDoc(doc(db, "meta", "catalog"));
+  return snap.exists() ? snap.data() : null;
+}
+
+async function persistCatalog(cat) {
+  await setDoc(doc(db, "meta", "catalog"), cat);
+}
+
+// ---- Firestore : mois ----
 async function fetchMonth(id) {
   const snap = await getDoc(doc(db, "months", id));
   return snap.exists() ? snap.data() : null;
@@ -254,11 +285,11 @@ function scheduleSave() {
 }
 
 function cloneForNewMonth(prev) {
-  return {
-    income: prev.income.map((r) => ({ ...r })),
-    expenses: prev.expenses.map((r) => ({ ...r, paid: false })),
-    bankBalance: 0
-  };
+  const values = {};
+  Object.entries((prev && prev.values) || {}).forEach(([id, v]) => {
+    values[id] = { amount: v.amount || 0, paid: false };
+  });
+  return { values, bankBalance: 0 };
 }
 
 async function loadMonth(id) {
@@ -273,13 +304,14 @@ async function loadMonth(id) {
     renderTotals();
     return;
   }
+  if (!monthData.values) monthData.values = {};
   render();
 }
 
 createMonthBtn.addEventListener("click", async () => {
   const prevId = addMonths(currentMonthId, -1);
   const prev = await fetchMonth(prevId);
-  monthData = prev ? cloneForNewMonth(prev) : DEFAULT_TEMPLATE();
+  monthData = prev ? cloneForNewMonth(prev) : { values: {}, bankBalance: 0 };
   emptyMonthBanner.classList.add("hidden");
   render();
   await saveMonth();
@@ -295,7 +327,9 @@ function render() {
 
 function renderIncome() {
   incomeList.innerHTML = "";
-  monthData.income.forEach((row) => incomeList.appendChild(buildRow(row, "income")));
+  catalog.items
+    .filter((it) => it.type === "income" && isActiveAt(it, currentMonthId))
+    .forEach((item) => incomeList.appendChild(buildSuiviRow(item)));
 }
 
 function renderExpenseGroups() {
@@ -304,62 +338,45 @@ function renderExpenseGroups() {
     const section = document.createElement("section");
     section.className = "card";
     section.innerHTML = `
-      <div class="card-header">
-        <h2>${group.label}</h2>
-        <button type="button" class="add-row-btn" data-group="${group.key}">+ Ajouter</button>
-      </div>
-      <div class="rows" data-group-rows="${group.key}"></div>
+      <div class="card-header"><h2>${group.label}</h2></div>
+      <div class="rows"></div>
     `;
     groupsContainer.appendChild(section);
-    const rowsEl = section.querySelector(`[data-group-rows="${group.key}"]`);
-    monthData.expenses.filter((e) => e.group === group.key).forEach((row) => rowsEl.appendChild(buildRow(row, "expense")));
-  });
-
-  groupsContainer.querySelectorAll(".add-row-btn").forEach((btn) => {
-    btn.addEventListener("click", () => {
-      monthData.expenses.push({ id: uid(), label: "Nouvelle ligne", amount: 0, paid: false, group: btn.dataset.group });
-      renderExpenseGroups();
-      renderTotals();
-      scheduleSave();
-    });
+    const rowsEl = section.querySelector(".rows");
+    catalog.items
+      .filter((it) => it.type === group.key && isActiveAt(it, currentMonthId))
+      .forEach((item) => rowsEl.appendChild(buildSuiviRow(item)));
   });
 }
 
-function buildRow(row, kind) {
+function buildSuiviRow(item) {
+  const isExpense = item.type !== "income";
+  const current = () => monthData.values[item.id] || { amount: 0, paid: false };
+  const v0 = current();
   const div = document.createElement("div");
   div.className = "row";
   div.innerHTML = `
-    ${kind === "expense" ? `<input type="checkbox" class="paid-check" ${row.paid ? "checked" : ""} title="Payé" />` : ""}
-    <input type="text" class="label-input" value="${escapeHtml(row.label)}" />
-    <input type="number" class="amount-input" value="${row.amount}" step="0.01" />
-    <button type="button" class="remove-row" title="Supprimer">✕</button>
+    ${isExpense ? `<input type="checkbox" class="paid-check" ${v0.paid ? "checked" : ""} title="Payé" />` : `<span class="paid-check-spacer"></span>`}
+    <span class="label-text">${escapeHtml(item.label)}</span>
+    <input type="number" class="amount-input" value="${v0.amount}" step="0.01" />
   `;
-  const labelInput = div.querySelector(".label-input");
   const amountInput = div.querySelector(".amount-input");
-  const removeBtn = div.querySelector(".remove-row");
   const paidCheck = div.querySelector(".paid-check");
 
-  labelInput.addEventListener("input", () => { row.label = labelInput.value; scheduleSave(); });
   amountInput.addEventListener("input", () => {
-    row.amount = parseFloat(amountInput.value) || 0;
+    const c = current();
+    monthData.values[item.id] = { amount: parseFloat(amountInput.value) || 0, paid: c.paid };
     renderTotals();
     scheduleSave();
   });
   if (paidCheck) {
-    paidCheck.addEventListener("change", () => { row.paid = paidCheck.checked; renderTotals(); scheduleSave(); });
+    paidCheck.addEventListener("change", () => {
+      const c = current();
+      monthData.values[item.id] = { amount: c.amount, paid: paidCheck.checked };
+      renderTotals();
+      scheduleSave();
+    });
   }
-  removeBtn.addEventListener("click", () => {
-    if (kind === "income") {
-      monthData.income = monthData.income.filter((r) => r.id !== row.id);
-      renderIncome();
-    } else {
-      monthData.expenses = monthData.expenses.filter((r) => r.id !== row.id);
-      renderExpenseGroups();
-    }
-    renderTotals();
-    scheduleSave();
-  });
-
   return div;
 }
 
@@ -374,11 +391,11 @@ function renderTotals() {
   const days = remainingDays(currentMonthId);
   daysLeftEl.textContent = days;
 
-  if (!monthData) {
+  if (!monthData || !catalog) {
     [totalIncomeEl, totalExpensesEl, balanceEl, chargesAVenirEl, resteAVivreEl, dailyAllocationEl].forEach((el) => el.textContent = euros(0));
     return;
   }
-  const t = computeTotals(monthData);
+  const t = computeTotals(catalog, monthData);
   totalIncomeEl.textContent = euros(t.totalIncome);
   totalExpensesEl.textContent = euros(t.totalExpenses);
   balanceEl.textContent = euros(t.balance);
@@ -398,37 +415,33 @@ function escapeHtml(str) {
   return div.innerHTML;
 }
 
+function escapeAttr(str) {
+  return str.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+}
+
 // ---- Navigation mois ----
 prevMonthBtn.addEventListener("click", () => loadMonth(addMonths(currentMonthId, -1)));
 nextMonthBtn.addEventListener("click", () => loadMonth(addMonths(currentMonthId, 1)));
 
-addIncomeBtn.addEventListener("click", () => {
-  monthData.income.push({ id: uid(), label: "Nouvelle source", amount: 0 });
-  renderIncome();
-  renderTotals();
-  scheduleSave();
-});
-
 // ---- Grille partagée (postes en lignes, mois en colonnes) ----
-// Utilisée en mode éditable pour les Prévisions et en lecture seule pour l'Historique.
-function buildMonthGrid(table, ids, monthsByI, editable) {
-  const base = ids.map((id) => monthsByI[id]).reverse().find((d) => d) || DEFAULT_TEMPLATE();
-  const incomeRows = base.income.map((r) => r.label);
-  const expenseRowsByGroup = {};
-  GROUPS.forEach((g) => { expenseRowsByGroup[g.key] = base.expenses.filter((e) => e.group === g.key).map((e) => e.label); });
-
+// items : liste de postes catalogue déjà filtrée par l'appelant (actifs pour Prévisions,
+// tous pour Historique). opts.editable : montants modifiables. opts.structural : permet
+// aussi de renommer/ajouter/supprimer des postes (réservé aux Prévisions).
+function buildMonthGrid(table, ids, monthsByI, items, opts) {
   let html = "<thead><tr><th>Poste</th>";
   ids.forEach((id) => { html += `<th>${monthLabelShort(id)}</th>`; });
   html += "</tr></thead><tbody>";
 
-  html += `<tr class="section-row"><td colspan="${ids.length + 1}">Revenus</td></tr>`;
-  incomeRows.forEach((label) => { html += gridRow(label, "income", null, ids, monthsByI, editable); });
-  html += gridTotalRow("Sous-total revenus", ids, monthsByI, (t) => t.totalIncome);
-
-  GROUPS.forEach((g) => {
-    html += `<tr class="section-row"><td colspan="${ids.length + 1}">${g.label}</td></tr>`;
-    expenseRowsByGroup[g.key].forEach((label) => { html += gridRow(label, "expense", g.key, ids, monthsByI, editable); });
-    html += gridTotalRow(`Sous-total ${g.label.toLowerCase()}`, ids, monthsByI, (t) => t.byGroup[g.key]);
+  SECTIONS.forEach((sec) => {
+    html += `<tr class="section-row"><td colspan="${ids.length + 1}">${sec.label}</td></tr>`;
+    items.filter((it) => it.type === sec.key).forEach((item) => {
+      html += gridRow(item, ids, monthsByI, opts);
+    });
+    if (opts.structural) {
+      html += `<tr class="add-row"><td colspan="${ids.length + 1}"><button type="button" class="add-item-btn" data-type="${sec.key}">+ Ajouter un poste</button></td></tr>`;
+    }
+    const getValue = sec.key === "income" ? (t) => t.totalIncome : (t) => t.byGroup[sec.key];
+    html += gridTotalRow(sec.key === "income" ? "Sous-total revenus" : `Sous-total ${sec.label.toLowerCase()}`, ids, monthsByI, getValue);
   });
 
   html += gridTotalRow("Total dépenses", ids, monthsByI, (t) => t.totalExpenses, true);
@@ -437,18 +450,24 @@ function buildMonthGrid(table, ids, monthsByI, editable) {
   table.innerHTML = html;
 }
 
-function gridRow(label, kind, group, ids, monthsByI, editable) {
-  let row = `<tr><td>${escapeHtml(label)}</td>`;
+function gridRow(item, ids, monthsByI, opts) {
+  let row = `<tr><td class="poste-cell">`;
+  if (opts.structural) {
+    row += `<input type="text" class="rename-input" value="${escapeAttr(item.label)}" data-item-id="${item.id}" />
+      <button type="button" class="remove-item-btn" data-item-id="${item.id}" title="Supprimer ce poste">✕</button>`;
+  } else {
+    row += escapeHtml(item.label);
+  }
+  row += `</td>`;
   ids.forEach((id) => {
     const data = monthsByI[id];
-    const list = kind === "income" ? data?.income : data?.expenses?.filter((e) => e.group === group);
-    const item = list?.find((r) => r.label === label);
-    const value = item ? item.amount : 0;
-    if (editable) {
-      row += `<td><input class="forecast-input" type="number" step="0.01" value="${value}"
-        data-month-id-attr="${id}" data-label="${escapeAttr(label)}" data-kind="${kind}" data-group="${group || ""}" /></td>`;
+    const v = data && data.values && data.values[item.id];
+    const amount = v ? v.amount : 0;
+    if (opts.editable) {
+      row += `<td><input class="forecast-input" type="number" step="0.01" value="${amount}"
+        data-month-id-attr="${id}" data-item-id="${item.id}" /></td>`;
     } else {
-      row += `<td>${euros(value)}</td>`;
+      row += `<td>${euros(amount)}</td>`;
     }
   });
   return row + "</tr>";
@@ -457,14 +476,13 @@ function gridRow(label, kind, group, ids, monthsByI, editable) {
 function gridTotalRow(label, ids, monthsByI, getValue, strong) {
   let row = `<tr class="${strong ? "total-row" : "subtotal-row"}"><td>${label}</td>`;
   ids.forEach((id) => {
-    const data = monthsByI[id];
-    const t = data ? computeTotals(data) : { totalIncome: 0, totalExpenses: 0, balance: 0, byGroup: { regulieres: 0, occasionnelles: 0, capital: 0 } };
+    const t = computeTotals(catalog, monthsByI[id]);
     row += `<td>${euros(getValue(t))}</td>`;
   });
   return row + "</tr>";
 }
 
-// ---- Historique (grille en lecture seule des mois passés) ----
+// ---- Historique (grille en lecture seule, tous les postes, mois passés) ----
 async function renderHistory() {
   historyTable.innerHTML = `<tr><td>Chargement…</td></tr>`;
   const currentId = monthId(new Date());
@@ -476,10 +494,10 @@ async function renderHistory() {
   const ids = past.map((m) => m.id);
   const monthsByI = {};
   past.forEach(({ id, data }) => { monthsByI[id] = data; });
-  buildMonthGrid(historyTable, ids, monthsByI, false);
+  buildMonthGrid(historyTable, ids, monthsByI, catalog.items, { editable: false, structural: false });
 }
 
-// ---- Prévisions annuelles (grille éditable sur 12 mois) ----
+// ---- Prévisions annuelles (grille éditable sur 12 mois, postes actifs uniquement) ----
 function forecastMonthIds() {
   const base = monthId(new Date());
   return Array.from({ length: 12 }, (_, i) => addMonths(base, i));
@@ -490,51 +508,95 @@ async function renderForecast() {
   const ids = forecastMonthIds();
   const docs = await Promise.all(ids.map(fetchMonth));
   const monthsByI = {};
-  ids.forEach((id, i) => { monthsByI[id] = docs[i]; });
+  ids.forEach((id, i) => { monthsByI[id] = docs[i] || { values: {} }; });
 
-  buildMonthGrid(forecastTable, ids, monthsByI, true);
+  const activeItems = catalog.items.filter((it) => !it.retiredAt);
+  buildMonthGrid(forecastTable, ids, monthsByI, activeItems, { editable: true, structural: true });
 
   forecastTable.querySelectorAll(".forecast-input").forEach((input) => {
     input.addEventListener("change", async () => {
-      const { monthIdAttr, label, kind, group } = input.dataset;
+      const { monthIdAttr, itemId } = input.dataset;
       const value = parseFloat(input.value) || 0;
-      await setForecastValue(monthIdAttr, label, kind, group, value, monthsByI);
+      await setForecastValue(monthIdAttr, itemId, value, monthsByI);
     });
+  });
+  forecastTable.querySelectorAll(".rename-input").forEach((input) => {
+    input.addEventListener("change", () => renameItem(input.dataset.itemId, input.value));
+  });
+  forecastTable.querySelectorAll(".remove-item-btn").forEach((btn) => {
+    btn.addEventListener("click", () => removeItem(btn.dataset.itemId, ids, monthsByI));
+  });
+  forecastTable.querySelectorAll(".add-item-btn").forEach((btn) => {
+    btn.addEventListener("click", () => addItem(btn.dataset.type));
   });
 }
 
-async function setForecastValue(targetMonthId, label, kind, group, value, monthsByI) {
+async function setForecastValue(targetMonthId, itemId, value, monthsByI) {
   let data = monthsByI[targetMonthId];
-  if (!data) {
-    // Crée le mois en clonant le mois disponible le plus proche dans la fenêtre, sinon le mois courant, sinon le template.
+  if (!data || !data.values || !Object.keys(data).length) {
     const ids = forecastMonthIds();
     const idx = ids.indexOf(targetMonthId);
     let sourceData = null;
-    for (let i = idx - 1; i >= 0 && !sourceData; i--) sourceData = monthsByI[ids[i]];
-    if (!sourceData) sourceData = (await fetchMonth(currentMonthId)) || DEFAULT_TEMPLATE();
+    for (let i = idx - 1; i >= 0 && !sourceData; i--) sourceData = monthsByI[ids[i]] && monthsByI[ids[i]].values ? monthsByI[ids[i]] : null;
+    if (!sourceData) sourceData = (await fetchMonth(currentMonthId)) || { values: {} };
     data = cloneForNewMonth(sourceData);
     monthsByI[targetMonthId] = data;
   }
-  const list = kind === "income" ? data.income : data.expenses;
-  let item = list.find((r) => r.label === label && (kind === "income" || r.group === group));
-  if (!item) {
-    item = kind === "income" ? { id: uid(), label, amount: 0 } : { id: uid(), label, amount: 0, paid: false, group };
-    list.push(item);
-  }
-  item.amount = value;
+  const prev = data.values[itemId] || { amount: 0, paid: false };
+  data.values[itemId] = { amount: value, paid: prev.paid };
   await persistMonth(targetMonthId, { ...data, updatedAt: new Date().toISOString(), updatedBy: currentUser.email });
+  await renderForecast();
+  if (targetMonthId === currentMonthId && currentView === "suivi") await loadMonth(currentMonthId);
+}
+
+async function addItem(type) {
+  const label = prompt("Nom du nouveau poste :");
+  if (!label || !label.trim()) return;
+  catalog.items.push({ id: uid(), label: label.trim(), type, retiredAt: null });
+  await persistCatalog(catalog);
   await renderForecast();
 }
 
-function escapeAttr(str) {
-  return str.replace(/&/g, "&amp;").replace(/"/g, "&quot;");
+async function renameItem(itemId, newLabel) {
+  const item = catalog.items.find((it) => it.id === itemId);
+  const trimmed = newLabel.trim();
+  if (!item || !trimmed || trimmed === item.label) return;
+  item.label = trimmed;
+  await persistCatalog(catalog);
+  await renderForecast();
+}
+
+async function removeItem(itemId, ids, monthsByI) {
+  const item = catalog.items.find((it) => it.id === itemId);
+  if (!item) return;
+  const affected = ids.filter((id) => {
+    const v = monthsByI[id] && monthsByI[id].values && monthsByI[id].values[itemId];
+    return v && v.amount;
+  });
+  if (affected.length) {
+    const detail = affected.map((id) => `${monthLabel(id)} (${euros(monthsByI[id].values[itemId].amount)})`).join(", ");
+    const ok = confirm(`"${item.label}" a un montant prévu sur : ${detail}.\n\nLe supprimer remettra ces montants à 0 (l'historique passé n'est pas affecté). Continuer ?`);
+    if (!ok) return;
+  } else {
+    const ok = confirm(`Supprimer "${item.label}" ? Il restera visible dans l'Historique pour les mois passés.`);
+    if (!ok) return;
+  }
+  item.retiredAt = monthId(new Date());
+  await persistCatalog(catalog);
+  for (const id of affected) {
+    const data = monthsByI[id];
+    data.values[itemId] = { ...data.values[itemId], amount: 0 };
+    await persistMonth(id, { ...data, updatedAt: new Date().toISOString(), updatedBy: currentUser.email });
+  }
+  await renderForecast();
+  if (affected.includes(currentMonthId) && currentView === "suivi") await loadMonth(currentMonthId);
 }
 
 // ---- Analyse budget (graphiques) ----
 async function renderAnalyse() {
   analyseMonthLabel.textContent = monthLabel(currentMonthId);
-  const data = monthData || await fetchMonth(currentMonthId);
-  const t = data ? computeTotals(data) : { byGroup: { regulieres: 0, occasionnelles: 0, capital: 0 }, balance: 0, totalIncome: 0 };
+  const data = monthData || (await fetchMonth(currentMonthId)) || { values: {} };
+  const t = computeTotals(catalog, data);
 
   Object.values(charts).forEach((c) => c?.destroy());
 
@@ -550,7 +612,10 @@ async function renderAnalyse() {
     options: { plugins: { legend: { position: "bottom" } } }
   });
 
-  const regulieres = (data?.expenses || []).filter((e) => e.group === "regulieres" && e.amount > 0);
+  const regulieres = catalog.items
+    .filter((it) => it.type === "regulieres")
+    .map((it) => ({ label: it.label, amount: (data.values[it.id] && data.values[it.id].amount) || 0 }))
+    .filter((r) => r.amount > 0);
   charts.bar = new Chart($("#chart-bar"), {
     type: "bar",
     data: {
@@ -565,7 +630,7 @@ async function renderAnalyse() {
   const labels = [];
   const values = [];
   months.forEach(({ id, data: d }) => {
-    const dt = computeTotals(d);
+    const dt = computeTotals(catalog, d);
     cumul += dt.byGroup.capital;
     labels.push(monthLabelShort(id));
     values.push(cumul);
