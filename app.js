@@ -210,6 +210,9 @@ let catalog = null;
 let saveTimeout = null;
 let currentScope = lsGet("budget-scope") || DEFAULT_SCOPE;
 let currentView = "suivi";
+// Prévisions : vue compacte par défaut (juste le libellé du poste). Le mode édition
+// révèle renommage / espace / interne / suppression / ajout + la barre d'attribution.
+let forecastEdit = false;
 let charts = {
   pie: null, pieAvg: null, line: null, investment: null, balance: null, occTop: null,
   famIncome: null, famSplit: null, famStack: null
@@ -246,10 +249,12 @@ const scopeHint = $("#scope-hint");
 const suiviIndividual = $("#suivi-individual");
 const suiviFamille = $("#suivi-famille");
 const analyseFamille = $("#analyse-famille");
+const bulkOwner = $("#bulk-owner");
 const bulkOwnerSelect = $("#bulk-owner-select");
 const bulkOwnerCount = $("#bulk-owner-count");
 const bulkOwnerBanks = $("#bulk-owner-banks");
 const bulkOwnerApply = $("#bulk-owner-apply");
+const forecastEditToggle = $("#forecast-edit-toggle");
 
 // ---- Sélecteur d'espace ----
 const SCOPE_TABS = [{ key: "famille", label: "Famille" }, ...SPACES.map((s) => ({ key: s.key, label: s.label }))];
@@ -364,6 +369,14 @@ document.querySelectorAll(".nav-btn").forEach((btn) => {
 // ---- Attribution en masse (migration / rééquilibrage depuis Prévisions) ----
 bulkOwnerSelect.innerHTML = OWNER_KEYS.map((k) => `<option value="${k}">${OWNER_LABEL[k]}</option>`).join("");
 bulkOwnerApply.addEventListener("click", () => bulkAssignOwner(bulkOwnerSelect.value, bulkOwnerBanks.checked));
+
+forecastEditToggle.addEventListener("click", () => {
+  forecastEdit = !forecastEdit;
+  forecastEditToggle.textContent = forecastEdit ? "✓ Terminé" : "✏️ Modifier les postes";
+  forecastEditToggle.classList.toggle("active", forecastEdit);
+  bulkOwner.hidden = !forecastEdit;
+  renderForecast();
+});
 
 async function switchView(view) {
   currentView = view;
@@ -876,7 +889,7 @@ function gridRow(item, ids, monthsByI, opts) {
       </label>
       <button type="button" class="remove-item-btn" data-item-id="${item.id}" title="Supprimer ce poste">✕</button>`;
   } else {
-    row += escapeHtml(item.label);
+    row += `<span class="poste-label" title="${escapeAttr(item.label)}">${escapeHtml(item.label)}</span>`;
   }
   row += `</td>`;
   ids.forEach((id) => {
@@ -905,6 +918,7 @@ function gridTotalRow(label, ids, monthsByI, getValue, strong) {
 // ---- Historique (grille en lecture seule, tous les postes, mois passés) ----
 async function renderHistory() {
   historyTable.innerHTML = `<tr><td>Chargement…</td></tr>`;
+  historyTable.classList.add("compact");
   const currentId = monthId(new Date());
   const past = (await fetchAllMonthsAsc()).filter(({ id }) => id < currentId);
   if (!past.length) {
@@ -932,10 +946,12 @@ async function renderForecast() {
   ids.forEach((id, i) => { monthsByI[id] = docs[i] || { values: {} }; });
 
   const activeItems = forecastListedItems();
+  bulkOwner.hidden = !forecastEdit;
+  forecastTable.classList.toggle("compact", !forecastEdit);
   bulkOwnerCount.textContent = currentScope === "famille"
     ? `les ${activeItems.length} postes`
     : `les ${activeItems.length} postes de « ${OWNER_LABEL[currentScope]} »`;
-  buildMonthGrid(forecastTable, ids, monthsByI, activeItems, { editable: true, structural: true });
+  buildMonthGrid(forecastTable, ids, monthsByI, activeItems, { editable: true, structural: forecastEdit });
 
   forecastTable.querySelectorAll(".forecast-input").forEach((input) => {
     input.addEventListener("change", async () => {
