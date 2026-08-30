@@ -1,4 +1,4 @@
-import { firebaseConfig, AUTHORIZED_EMAILS, GOOGLE_CLIENT_ID } from "./firebase-config.js";
+import { firebaseConfig, AUTHORIZED_EMAILS, GOOGLE_CLIENT_ID, SPACES } from "./firebase-config.js";
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js";
 import {
   getAuth, GoogleAuthProvider, signInWithCredential, signOut, onAuthStateChanged
@@ -21,6 +21,24 @@ const GROUPS = [
 ];
 const SECTIONS = [{ key: "income", label: "Revenus" }, ...GROUPS];
 
+// ---- Espaces budgétaires (voir firebase-config.js) ----
+// Chaque poste porte un `owner` ∈ OWNER_KEYS. "commun" = pot commun du foyer, les autres
+// = budget perso. La vue "Famille" (scope "famille") consolide les trois espaces.
+const OWNER_KEYS = SPACES.map((s) => s.key);
+const OWNER_LABEL = Object.fromEntries(SPACES.map((s) => [s.key, s.label]));
+const FALLBACK_COLORS = ["#2563eb", "#059669", "#7c3aed", "#d97706", "#db2777"];
+const OWNER_COLOR = Object.fromEntries(SPACES.map((s, i) => [s.key, s.color || FALLBACK_COLORS[i % FALLBACK_COLORS.length]]));
+const OWNER_BG = { commun: "#eef4ff", habib: "#ecfdf5", marwa: "#f5f0ff" };
+const DEFAULT_SCOPE = "famille";
+function ownerColor(key) { return OWNER_COLOR[key] || "#6b7280"; }
+function ownerBg(key) { return OWNER_BG[key] || "#f4f6f8"; }
+
+// localStorage peut lever (navigation privée, cookies bloqués) : on ne casse pas l'app pour ça.
+function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* ignoré */ } }
+
+// Un poste appartient à un seul espace. Les postes du catalogue par défaut démarrent sur
+// "commun" ; on réaffecte ensuite chaque poste à son espace depuis l'écran Prévisions.
 const DEFAULT_CATALOG = () => ({
   items: [
     { id: uid(), label: "Salaire", type: "income", retiredAt: null },
@@ -56,7 +74,7 @@ const DEFAULT_CATALOG = () => ({
     { id: uid(), label: "Amendes", type: "occasionnelles", retiredAt: null },
     { id: uid(), label: "Épargne", type: "capital", retiredAt: null, role: "epargne" },
     { id: uid(), label: "Investissement", type: "capital", retiredAt: null, role: "investissement" }
-  ]
+  ].map((it) => ({ owner: "commun", ...it }))
 });
 
 function uid() {
@@ -101,18 +119,63 @@ function euros(n) {
   return (n || 0).toLocaleString("fr-FR", { style: "currency", currency: "EUR" });
 }
 
+function el(tag, cls, html) {
+  const node = document.createElement(tag);
+  if (cls) node.className = cls;
+  if (html != null) node.innerHTML = html;
+  return node;
+}
+
 // Un poste est actif pour un mois donné s'il n'a jamais été retiré, ou s'il a été retiré
 // après ce mois (permet de garder les postes retirés visibles dans l'historique passé).
 function isActiveAt(item, monthIdStr) {
   return !item.retiredAt || monthIdStr < item.retiredAt;
 }
 
-function computeTotals(cat, data) {
+// Un poste est dans le périmètre du scope courant : soit on regarde la famille entière,
+// soit uniquement les postes d'un espace précis.
+function inScope(item, scope) {
+  return scope === "famille" || item.owner === scope;
+}
+
+// Solde bancaire : nouveau format { commun, habib, marwa }. L'ancien format (un seul nombre)
+// est traité comme "tout sur le compte commun" et converti à la première écriture.
+function bankBalancesOf(data) {
+  if (!data) return {};
+  if (data.bankBalances && typeof data.bankBalances === "object") return data.bankBalances;
+  if (typeof data.bankBalance === "number") return { commun: data.bankBalance };
+  return {};
+}
+function bankFor(data, scope) {
+  const b = bankBalancesOf(data);
+  if (scope === "famille") return OWNER_KEYS.reduce((s, k) => s + (b[k] || 0), 0);
+  return b[scope] || 0;
+}
+
+// Montant d'un espace avec l'extérieur du foyer (hors virements internes), pour un mois donné.
+// `kind` vaut "income" ou "expense". Sert à la ventilation et aux graphes consolidés.
+function ownerExternalOf(data, scope, kind) {
+  if (!catalog) return 0;
+  const values = (data && data.values) || {};
+  return catalog.items.reduce((s, it) => {
+    if (it.owner !== scope || it.internal) return s;
+    const isIncome = it.type === "income";
+    if (kind === "income" && !isIncome) return s;
+    if (kind === "expense" && isIncome) return s;
+    return s + ((values[it.id] && values[it.id].amount) || 0);
+  }, 0);
+}
+
+function computeTotals(cat, data, scope = "famille") {
   const values = (data && data.values) || {};
   let totalIncome = 0;
   const byGroup = { regulieres: 0, occasionnelles: 0, capital: 0 };
   let chargesAVenir = 0;
   cat.items.forEach((item) => {
+    if (!inScope(item, scope)) return;
+    // Dans le consolidé, les virements internes au foyer (ex. "Virement → commun")
+    // s'annulent : on ne compte que les flux avec l'extérieur.
+    if (scope === "famille" && item.internal) return;
     const v = values[item.id];
     const amount = (v && v.amount) || 0;
     if (item.type === "income") {
@@ -124,8 +187,9 @@ function computeTotals(cat, data) {
   });
   const totalExpenses = byGroup.regulieres + byGroup.occasionnelles + byGroup.capital;
   const balance = totalIncome - totalExpenses;
-  const resteAVivreReel = ((data && data.bankBalance) || 0) - chargesAVenir;
-  return { totalIncome, byGroup, totalExpenses, balance, chargesAVenir, resteAVivreReel };
+  const bankBalance = bankFor(data, scope);
+  const resteAVivreReel = bankBalance - chargesAVenir;
+  return { totalIncome, byGroup, totalExpenses, balance, chargesAVenir, resteAVivreReel, bankBalance };
 }
 
 // ---- State ----
@@ -134,7 +198,12 @@ let currentMonthId = monthId(new Date());
 let monthData = null;
 let catalog = null;
 let saveTimeout = null;
-let charts = { pie: null, pieAvg: null, line: null, investment: null, balance: null, occTop: null };
+let currentScope = lsGet("budget-scope") || DEFAULT_SCOPE;
+let currentView = "suivi";
+let charts = {
+  pie: null, pieAvg: null, line: null, investment: null, balance: null, occTop: null,
+  famIncome: null, famSplit: null, famStack: null
+};
 
 // ---- DOM ----
 const $ = (sel) => document.querySelector(sel);
@@ -162,6 +231,56 @@ const createMonthBtn = $("#create-month-btn");
 const historyTable = $("#history-table");
 const forecastTable = $("#forecast-table");
 const analyseMonthLabel = $("#analyse-month-label");
+const scopeSwitch = $("#scope-switch");
+const scopeHint = $("#scope-hint");
+const suiviIndividual = $("#suivi-individual");
+const suiviFamille = $("#suivi-famille");
+const analyseFamille = $("#analyse-famille");
+
+// ---- Sélecteur d'espace ----
+const SCOPE_TABS = [{ key: "famille", label: "Famille" }, ...SPACES.map((s) => ({ key: s.key, label: s.label }))];
+
+function scopeHintText(scope) {
+  if (scope === "famille") return "Vue consolidée du foyer";
+  if (scope === "commun") return "Compte commun : charges partagées du foyer";
+  return "Budget personnel de " + (OWNER_LABEL[scope] || scope);
+}
+
+function buildScopeSwitch() {
+  scopeSwitch.innerHTML = "";
+  SCOPE_TABS.forEach((t) => {
+    const btn = el("button", "seg" + (t.key === currentScope ? " active" : ""));
+    btn.dataset.scope = t.key;
+    btn.setAttribute("role", "tab");
+    btn.setAttribute("aria-selected", t.key === currentScope ? "true" : "false");
+    const dot = el("span", "seg-dot" + (t.key === "famille" ? " seg-dot-fam" : ""));
+    if (t.key !== "famille") dot.style.background = ownerColor(t.key);
+    btn.append(dot, document.createTextNode(t.label));
+    btn.addEventListener("click", () => setScope(t.key));
+    scopeSwitch.appendChild(btn);
+  });
+  scopeHint.textContent = scopeHintText(currentScope);
+}
+
+function setScope(scope) {
+  if (scope === currentScope) return;
+  currentScope = scope;
+  lsSet("budget-scope", scope);
+  scopeSwitch.querySelectorAll(".seg").forEach((b) => {
+    const on = b.dataset.scope === scope;
+    b.classList.toggle("active", on);
+    b.setAttribute("aria-selected", on ? "true" : "false");
+  });
+  scopeHint.textContent = scopeHintText(scope);
+  rerenderCurrentView();
+}
+
+function rerenderCurrentView() {
+  if (currentView === "suivi") render();
+  else if (currentView === "historique") renderHistory();
+  else if (currentView === "previsions") renderForecast();
+  else if (currentView === "analyse") renderAnalyse();
+}
 
 // ---- Auth ----
 // On utilise Google Identity Services (le bouton "Sign in with Google" de Google) plutôt que
@@ -212,6 +331,15 @@ onAuthStateChanged(auth, async (user) => {
     catalog = DEFAULT_CATALOG();
     await persistCatalog(catalog);
   }
+  await normalizeCatalogOwners();
+
+  // Au tout premier chargement (aucun choix mémorisé), on ouvre sur l'espace perso de la
+  // personne connectée plutôt que sur le consolidé.
+  if (!lsGet("budget-scope")) {
+    const mine = SPACES.find((s) => s.email === user.email);
+    currentScope = mine ? mine.key : DEFAULT_SCOPE;
+  }
+  buildScopeSwitch();
   await loadMonth(currentMonthId);
 });
 
@@ -221,6 +349,7 @@ document.querySelectorAll(".nav-btn").forEach((btn) => {
 });
 
 async function switchView(view) {
+  currentView = view;
   document.querySelectorAll(".nav-btn").forEach((b) => b.classList.toggle("active", b.dataset.view === view));
   document.querySelectorAll(".view").forEach((v) => v.classList.add("hidden"));
   $(`#view-${view}`).classList.remove("hidden");
@@ -243,6 +372,36 @@ async function fetchSettings() {
 
 async function persistCatalog(cat) {
   await setDoc(doc(db, "meta", "catalog"), cat);
+}
+
+// Migration douce : tout poste sans `owner` (ou avec un owner inconnu) est rattaché au
+// compte commun. On ne réécrit le catalogue que si quelque chose a changé.
+async function normalizeCatalogOwners() {
+  let changed = false;
+  catalog.items.forEach((it) => {
+    if (!OWNER_KEYS.includes(it.owner)) {
+      it.owner = "commun";
+      changed = true;
+    }
+  });
+  if (changed) await persistCatalog(catalog);
+}
+
+async function setItemOwner(itemId, owner) {
+  const item = catalog.items.find((it) => it.id === itemId);
+  if (!item || !OWNER_KEYS.includes(owner) || item.owner === owner) return;
+  item.owner = owner;
+  await persistCatalog(catalog);
+  await renderForecast();
+}
+
+async function setItemInternal(itemId, internal) {
+  const item = catalog.items.find((it) => it.id === itemId);
+  if (!item) return;
+  if (internal) item.internal = true;
+  else delete item.internal;
+  await persistCatalog(catalog);
+  await renderForecast();
 }
 
 // ---- Firestore : mois ----
@@ -290,7 +449,7 @@ function cloneForNewMonth(prev) {
   Object.entries((prev && prev.values) || {}).forEach(([id, v]) => {
     values[id] = { amount: v.amount || 0, paid: false };
   });
-  return { values, bankBalance: 0 };
+  return { values, bankBalances: {} };
 }
 
 async function loadMonth(id) {
@@ -298,21 +457,14 @@ async function loadMonth(id) {
   monthTitle.textContent = monthLabel(id);
   monthData = await fetchMonth(id);
   emptyMonthBanner.classList.toggle("hidden", !!monthData);
-  if (!monthData) {
-    groupsContainer.innerHTML = "";
-    incomeList.innerHTML = "";
-    bankBalanceEl.value = "";
-    renderTotals();
-    return;
-  }
-  if (!monthData.values) monthData.values = {};
+  if (monthData && !monthData.values) monthData.values = {};
   render();
 }
 
 createMonthBtn.addEventListener("click", async () => {
   const prevId = addMonths(currentMonthId, -1);
   const prev = await fetchMonth(prevId);
-  monthData = prev ? cloneForNewMonth(prev) : { values: {}, bankBalance: 0 };
+  monthData = prev ? cloneForNewMonth(prev) : { values: {}, bankBalances: {} };
   emptyMonthBanner.classList.add("hidden");
   render();
   await saveMonth();
@@ -320,21 +472,38 @@ createMonthBtn.addEventListener("click", async () => {
 
 // ---- Rendu : Suivi du mois ----
 function render() {
+  const fam = currentScope === "famille";
+  suiviIndividual.classList.toggle("hidden", fam);
+  suiviFamille.classList.toggle("hidden", !fam);
+
+  if (fam) {
+    renderFamilleSuivi();
+    return;
+  }
+
+  if (!monthData) {
+    incomeList.innerHTML = "";
+    groupsContainer.innerHTML = "";
+    $("#income-card").classList.add("hidden");
+    bankBalanceEl.value = "";
+    renderTotals();
+    return;
+  }
   renderIncome();
   renderExpenseGroups();
-  bankBalanceEl.value = monthData.bankBalance || 0;
+  bankBalanceEl.value = bankFor(monthData, currentScope) || 0;
   renderTotals();
 }
 
 // Un poste à 0 € pour le mois affiché n'est pas montré dans Suivi (juste du bruit visuel) :
 // pour lui donner un montant, ça se fait dans Prévisions, qui liste toujours tous les postes actifs.
 function hasAmount(item) {
-  return !!(monthData.values[item.id] && monthData.values[item.id].amount);
+  return !!(monthData && monthData.values[item.id] && monthData.values[item.id].amount);
 }
 
 function renderIncome() {
   incomeList.innerHTML = "";
-  const items = catalog.items.filter((it) => it.type === "income" && isActiveAt(it, currentMonthId) && hasAmount(it));
+  const items = catalog.items.filter((it) => it.type === "income" && inScope(it, currentScope) && isActiveAt(it, currentMonthId) && hasAmount(it));
   $("#income-card").classList.toggle("hidden", !items.length);
   items.forEach((item) => incomeList.appendChild(buildSuiviRow(item)));
 }
@@ -342,7 +511,7 @@ function renderIncome() {
 function renderExpenseGroups() {
   groupsContainer.innerHTML = "";
   GROUPS.forEach((group) => {
-    const items = catalog.items.filter((it) => it.type === group.key && isActiveAt(it, currentMonthId) && hasAmount(it));
+    const items = catalog.items.filter((it) => it.type === group.key && inScope(it, currentScope) && isActiveAt(it, currentMonthId) && hasAmount(it));
     if (!items.length) return;
     const section = document.createElement("section");
     section.className = "card";
@@ -387,9 +556,26 @@ function buildSuiviRow(item) {
   return div;
 }
 
+// Ligne en lecture seule pour la vue consolidée (l'édition des montants se fait dans
+// l'espace de chaque personne, ou dans Prévisions — comme l'écran Historique).
+function buildFamilleRow(item) {
+  const v = (monthData.values && monthData.values[item.id]) || { amount: 0, paid: false };
+  const isExpense = item.type !== "income";
+  const div = el("div", "row fam-row");
+  div.innerHTML =
+    (isExpense
+      ? `<span class="paid-dot${v.paid ? " on" : ""}" title="${v.paid ? "Payé" : "Non payé"}"></span>`
+      : `<span class="paid-check-spacer"></span>`) +
+    `<span class="label-text">${escapeHtml(item.label)}</span>` +
+    `<span class="fam-amount">${euros(v.amount)}</span>`;
+  return div;
+}
+
 bankBalanceEl.addEventListener("input", () => {
   if (!monthData) return;
-  monthData.bankBalance = parseFloat(bankBalanceEl.value) || 0;
+  monthData.bankBalances = bankBalancesOf(monthData);
+  monthData.bankBalances[currentScope] = parseFloat(bankBalanceEl.value) || 0;
+  delete monthData.bankBalance; // conversion de l'ancien format au premier enregistrement
   renderTotals();
   scheduleSave();
 });
@@ -399,10 +585,10 @@ function renderTotals() {
   daysLeftEl.textContent = days;
 
   if (!monthData || !catalog) {
-    [totalIncomeEl, totalExpensesEl, balanceEl, chargesAVenirEl, resteAVivreEl, dailyAllocationEl].forEach((el) => el.textContent = euros(0));
+    [totalIncomeEl, totalExpensesEl, balanceEl, chargesAVenirEl, resteAVivreEl, dailyAllocationEl].forEach((elm) => elm.textContent = euros(0));
     return;
   }
-  const t = computeTotals(catalog, monthData);
+  const t = computeTotals(catalog, monthData, currentScope);
   totalIncomeEl.textContent = euros(t.totalIncome);
   totalExpensesEl.textContent = euros(t.totalExpenses);
   balanceEl.textContent = euros(t.balance);
@@ -414,6 +600,164 @@ function renderTotals() {
   const allocation = days > 0 ? t.resteAVivreReel / days : t.resteAVivreReel;
   dailyAllocationEl.textContent = euros(allocation);
   dailyAllocationEl.classList.toggle("negative", allocation < 0);
+}
+
+// ---- Rendu : Suivi consolidé (espace "Famille") ----
+function renderFamilleSuivi() {
+  suiviFamille.innerHTML = "";
+  if (!catalog) return;
+  if (!monthData) {
+    suiviFamille.appendChild(el("p", "pb-empty", "Ce mois n'a pas encore de données."));
+    return;
+  }
+
+  const days = remainingDays(currentMonthId);
+  const fam = computeTotals(catalog, monthData, "famille");
+
+  // 1. Cartes résumé, avec ventilation par personne (flux avec l'extérieur du foyer)
+  const summary = el("section", "summary summary-fam");
+  summary.appendChild(famSummaryCard("Revenus du foyer", fam.totalIncome, "income"));
+  summary.appendChild(famSummaryCard("Dépenses du foyer", fam.totalExpenses, "expense"));
+  const soldeCard = famSummaryCard("Solde consolidé", fam.balance, null);
+  soldeCard.querySelector(".summary-value").classList.toggle("negative", fam.balance < 0);
+  summary.appendChild(soldeCard);
+  suiviFamille.appendChild(summary);
+
+  // 2. Rappel : les virements entre espaces sont neutralisés dans le consolidé
+  suiviFamille.appendChild(el("div", "fam-note",
+    "<span>&#8505;</span><span>Les <b>virements entre espaces</b> (marqués « interne » dans Prévisions) " +
+    "sont neutralisés ici : le consolidé ne compte que les flux avec l'extérieur du foyer. " +
+    "Chaque espace, lui, voit son virement comme un vrai mouvement.</span>"));
+
+  // 3. Suivi temps réel par espace
+  suiviFamille.appendChild(famRealtimePanel(days));
+
+  // 4. Un bloc par espace
+  OWNER_KEYS.forEach((owner) => suiviFamille.appendChild(famPersonBlock(owner)));
+}
+
+function famSummaryCard(label, value, kind) {
+  const card = el("div", "summary-card");
+  card.appendChild(el("span", "summary-label", label));
+  card.appendChild(el("span", "summary-value", euros(value)));
+  if (kind) {
+    const split = el("div", "summary-split");
+    OWNER_KEYS.forEach((k) => {
+      const v = ownerExternalOf(monthData, k, kind);
+      if (!v) return;
+      const chip = el("span", "k", `${OWNER_LABEL[k]}&nbsp;<b>${euros(v)}</b>`);
+      chip.style.setProperty("--oc", ownerColor(k));
+      split.appendChild(chip);
+    });
+    if (split.children.length) card.appendChild(split);
+  }
+  return card;
+}
+
+function famRealtimePanel(days) {
+  const card = el("section", "card live-panel");
+  card.appendChild(el("div", "card-header", "<h2>Suivi en temps réel par espace</h2>"));
+
+  const totals = {};
+  OWNER_KEYS.forEach((k) => { totals[k] = computeTotals(catalog, monthData, k); });
+  const famBank = OWNER_KEYS.reduce((s, k) => s + totals[k].bankBalance, 0);
+  const famUpcoming = OWNER_KEYS.reduce((s, k) => s + totals[k].chargesAVenir, 0);
+  const famReste = OWNER_KEYS.reduce((s, k) => s + totals[k].resteAVivreReel, 0);
+
+  const table = el("table", "fam-rt-table");
+  const head = el("thead");
+  let headRow = "<tr><th></th>";
+  OWNER_KEYS.forEach((k) => {
+    headRow += `<th><span class="own-chip" style="--oc:${ownerColor(k)}">${OWNER_LABEL[k]}</span></th>`;
+  });
+  headRow += '<th class="fam-col">Famille</th></tr>';
+  head.innerHTML = headRow;
+  table.appendChild(head);
+
+  const body = el("tbody");
+
+  // Ligne "Solde bancaire" : éditable, un compte par espace
+  const balRow = el("tr");
+  balRow.appendChild(el("td", null, "Solde bancaire"));
+  OWNER_KEYS.forEach((k) => {
+    const td = el("td");
+    const input = el("input", "fam-rt-input");
+    input.type = "number";
+    input.step = "0.01";
+    input.value = totals[k].bankBalance || 0;
+    input.setAttribute("aria-label", "Solde bancaire " + OWNER_LABEL[k]);
+    // "change" (et pas "input") : on ne reconstruit le tableau qu'à la validation du champ,
+    // pour ne pas perdre le focus à chaque frappe.
+    input.addEventListener("change", () => {
+      monthData.bankBalances = bankBalancesOf(monthData);
+      monthData.bankBalances[k] = parseFloat(input.value) || 0;
+      delete monthData.bankBalance;
+      scheduleSave();
+      renderFamilleSuivi();
+    });
+    td.appendChild(input);
+    balRow.appendChild(td);
+  });
+  balRow.appendChild(el("td", "fam-col", euros(famBank)));
+  body.appendChild(balRow);
+
+  body.appendChild(famRtRow("Charges à venir", OWNER_KEYS.map((k) => totals[k].chargesAVenir), famUpcoming));
+  body.appendChild(famRtRow("Reste à vivre", OWNER_KEYS.map((k) => totals[k].resteAVivreReel), famReste, true));
+  body.appendChild(famRtRow("Allocation / jour", OWNER_KEYS.map((k) => totals[k].resteAVivreReel / days), famReste / days, true));
+
+  table.appendChild(body);
+  card.appendChild(table);
+  return card;
+}
+
+function famRtRow(label, values, famValue, markNegative) {
+  const tr = el("tr");
+  tr.appendChild(el("td", null, label));
+  values.forEach((v) => {
+    const td = el("td", markNegative && v < 0 ? "negative" : null, euros(v));
+    tr.appendChild(td);
+  });
+  const famTd = el("td", "fam-col" + (markNegative && famValue < 0 ? " negative" : ""), euros(famValue));
+  tr.appendChild(famTd);
+  return tr;
+}
+
+function famPersonBlock(owner) {
+  const t = computeTotals(catalog, monthData, owner);
+  const block = el("section", "person-block");
+  block.style.setProperty("--pc", ownerColor(owner));
+  block.style.setProperty("--pc-bg", ownerBg(owner));
+
+  const head = el("div", "pb-head");
+  const who = el("span", "pb-who",
+    `<span class="pb-dot"></span>${OWNER_LABEL[owner]} <small>${owner === "commun" ? "compte commun" : "compte perso"}</small>`);
+  const bal = el("span", "pb-bal", `Solde <b class="${t.balance < 0 ? "negative" : ""}">${euros(t.balance)}</b>`);
+  head.append(who, bal);
+  block.appendChild(head);
+
+  const bodyEl = el("div", "pb-body");
+  let anyRow = false;
+  SECTIONS.forEach((sec) => {
+    const items = catalog.items.filter((it) =>
+      it.owner === owner && it.type === sec.key && isActiveAt(it, currentMonthId) && hasAmount(it));
+    if (!items.length) return;
+    anyRow = true;
+    bodyEl.appendChild(el("span", "pb-cat", sec.label));
+    const rows = el("div", "rows");
+    items.forEach((item) => rows.appendChild(buildFamilleRow(item)));
+    bodyEl.appendChild(rows);
+  });
+  if (!anyRow) {
+    bodyEl.appendChild(el("p", "pb-empty", "Aucun montant ce mois."));
+  } else {
+    const sub = el("div", "pb-sub",
+      `<span>Revenus <b>${euros(t.totalIncome)}</b></span>` +
+      `<span>Dépenses <b>${euros(t.totalExpenses)}</b></span>` +
+      `<span>Solde <b class="${t.balance < 0 ? "negative" : ""}">${euros(t.balance)}</b></span>`);
+    bodyEl.appendChild(sub);
+  }
+  block.appendChild(bodyEl);
+  return block;
 }
 
 function escapeHtml(str) {
@@ -428,8 +772,9 @@ function escapeAttr(str) {
 
 // ---- Grille partagée (postes en lignes, mois en colonnes) ----
 // items : liste de postes catalogue déjà filtrée par l'appelant (actifs pour Prévisions,
-// tous pour Historique). opts.editable : montants modifiables. opts.structural : permet
-// aussi de renommer/ajouter/supprimer des postes (réservé aux Prévisions).
+// tous pour Historique, et restreinte à l'espace courant). opts.editable : montants
+// modifiables. opts.structural : permet aussi de renommer/ré-affecter/ajouter/supprimer
+// des postes (réservé aux Prévisions).
 function buildMonthGrid(table, ids, monthsByI, items, opts) {
   let html = "<thead><tr><th>Poste</th>";
   ids.forEach((id) => { html += `<th>${monthLabelShort(id)}</th>`; });
@@ -457,6 +802,12 @@ function gridRow(item, ids, monthsByI, opts) {
   let row = `<tr><td class="poste-cell">`;
   if (opts.structural) {
     row += `<input type="text" class="rename-input" value="${escapeAttr(item.label)}" data-item-id="${item.id}" />
+      <select class="owner-select" data-item-id="${item.id}" title="Espace du poste">
+        ${OWNER_KEYS.map((k) => `<option value="${k}"${k === item.owner ? " selected" : ""}>${OWNER_LABEL[k]}</option>`).join("")}
+      </select>
+      <label class="internal-check" title="Flux interne au foyer (virement entre espaces) : neutralisé dans le consolidé">
+        <input type="checkbox" class="internal-toggle" data-item-id="${item.id}"${item.internal ? " checked" : ""} /> interne
+      </label>
       <button type="button" class="remove-item-btn" data-item-id="${item.id}" title="Supprimer ce poste">✕</button>`;
   } else {
     row += escapeHtml(item.label);
@@ -479,7 +830,7 @@ function gridRow(item, ids, monthsByI, opts) {
 function gridTotalRow(label, ids, monthsByI, getValue, strong) {
   let row = `<tr class="${strong ? "total-row" : "subtotal-row"}"><td>${label}</td>`;
   ids.forEach((id) => {
-    const t = computeTotals(catalog, monthsByI[id]);
+    const t = computeTotals(catalog, monthsByI[id], currentScope);
     row += `<td>${euros(getValue(t))}</td>`;
   });
   return row + "</tr>";
@@ -497,7 +848,8 @@ async function renderHistory() {
   const ids = past.map((m) => m.id);
   const monthsByI = {};
   past.forEach(({ id, data }) => { monthsByI[id] = data; });
-  buildMonthGrid(historyTable, ids, monthsByI, catalog.items, { editable: false, structural: false });
+  const items = catalog.items.filter((it) => inScope(it, currentScope));
+  buildMonthGrid(historyTable, ids, monthsByI, items, { editable: false, structural: false });
 }
 
 // ---- Prévisions annuelles (grille éditable sur 12 mois, postes actifs uniquement) ----
@@ -513,7 +865,7 @@ async function renderForecast() {
   const monthsByI = {};
   ids.forEach((id, i) => { monthsByI[id] = docs[i] || { values: {} }; });
 
-  const activeItems = catalog.items.filter((it) => !it.retiredAt);
+  const activeItems = catalog.items.filter((it) => !it.retiredAt && inScope(it, currentScope));
   buildMonthGrid(forecastTable, ids, monthsByI, activeItems, { editable: true, structural: true });
 
   forecastTable.querySelectorAll(".forecast-input").forEach((input) => {
@@ -525,6 +877,12 @@ async function renderForecast() {
   });
   forecastTable.querySelectorAll(".rename-input").forEach((input) => {
     input.addEventListener("change", () => renameItem(input.dataset.itemId, input.value));
+  });
+  forecastTable.querySelectorAll(".owner-select").forEach((sel) => {
+    sel.addEventListener("change", () => setItemOwner(sel.dataset.itemId, sel.value));
+  });
+  forecastTable.querySelectorAll(".internal-toggle").forEach((cb) => {
+    cb.addEventListener("change", () => setItemInternal(cb.dataset.itemId, cb.checked));
   });
   forecastTable.querySelectorAll(".remove-item-btn").forEach((btn) => {
     btn.addEventListener("click", () => removeItem(btn.dataset.itemId, ids, monthsByI));
@@ -554,7 +912,12 @@ async function setForecastValue(targetMonthId, itemId, value, monthsByI) {
 async function addItem(type) {
   const label = prompt("Nom du nouveau poste :");
   if (!label || !label.trim()) return;
-  catalog.items.push({ id: uid(), label: label.trim(), type, retiredAt: null });
+  let owner = currentScope === "famille" ? "commun" : currentScope;
+  if (currentScope === "famille") {
+    const ans = (prompt("À quel espace ? " + OWNER_KEYS.join(" / "), "commun") || "").trim().toLowerCase();
+    if (OWNER_KEYS.includes(ans)) owner = ans;
+  }
+  catalog.items.push({ id: uid(), label: label.trim(), type, owner, retiredAt: null });
   await persistCatalog(catalog);
   await renderForecast();
 }
@@ -644,11 +1007,12 @@ function pieOptions(dataset) {
 }
 
 async function renderAnalyse() {
-  analyseMonthLabel.textContent = monthLabel(currentMonthId);
+  analyseMonthLabel.textContent = monthLabel(currentMonthId) + " (" + (currentScope === "famille" ? "Famille" : OWNER_LABEL[currentScope]) + ")";
+  analyseFamille.classList.toggle("hidden", currentScope !== "famille");
   // Toujours relire Firestore (plutôt que de réutiliser monthData) : un montant modifié
   // depuis Prévisions ne met pas à jour l'état en mémoire de l'écran Suivi.
   const data = (await fetchMonth(currentMonthId)) || { values: {} };
-  const t = computeTotals(catalog, data);
+  const t = computeTotals(catalog, data, currentScope);
   const settings = await fetchSettings();
   const months = await fetchAllMonthsAsc();
 
@@ -666,7 +1030,7 @@ async function renderAnalyse() {
   const avgData = [0, 0, 0, 0];
   if (pastMonths.length) {
     pastMonths.forEach(({ data: d }) => {
-      const dt = computeTotals(catalog, d);
+      const dt = computeTotals(catalog, d, currentScope);
       avgData[0] += dt.byGroup.regulieres;
       avgData[1] += dt.byGroup.occasionnelles;
       avgData[2] += dt.byGroup.capital;
@@ -682,15 +1046,16 @@ async function renderAnalyse() {
 
   // Épargne cumulée = solde de départ + somme glissante de (Épargne du mois - Virement de
   // l'épargne du mois). L'Investissement n'entre pas en compte : c'est un poste distinct.
-  const epargneItem = catalog.items.find((it) => it.role === "epargne");
-  const virementItem = catalog.items.find((it) => it.role === "epargne_out");
+  // Les postes sont restreints à l'espace courant (plusieurs postes "épargne" possibles).
+  const epargneItems = catalog.items.filter((it) => it.role === "epargne" && inScope(it, currentScope));
+  const virementItems = catalog.items.filter((it) => it.role === "epargne_out" && inScope(it, currentScope));
   let cumul = settings.epargneBase || 0;
   const labels = [];
   const values = [];
   months.forEach(({ id, data: d }) => {
     const values_ = d.values || {};
-    const epargne = (epargneItem && values_[epargneItem.id] && values_[epargneItem.id].amount) || 0;
-    const virement = (virementItem && values_[virementItem.id] && values_[virementItem.id].amount) || 0;
+    const epargne = epargneItems.reduce((s, it) => s + ((values_[it.id] && values_[it.id].amount) || 0), 0);
+    const virement = virementItems.reduce((s, it) => s + ((values_[it.id] && values_[it.id].amount) || 0), 0);
     cumul += epargne - virement;
     labels.push(monthLabelShort(id));
     values.push(cumul);
@@ -703,14 +1068,14 @@ async function renderAnalyse() {
 
   // Investissement cumulé = solde de départ (à partir du mois configuré) + somme glissante
   // du poste Investissement, sans soustraction (pas de "retrait d'investissement" suivi).
-  const investissementItem = catalog.items.find((it) => it.role === "investissement");
+  const investissementItems = catalog.items.filter((it) => it.role === "investissement" && inScope(it, currentScope));
   const invStart = settings.investissementStart || "2026-08";
   let invCumul = settings.investissementBase || 0;
   const invLabels = [];
   const invValues = [];
   months.filter(({ id }) => id >= invStart).forEach(({ id, data: d }) => {
     const values_ = d.values || {};
-    const amount = (investissementItem && values_[investissementItem.id] && values_[investissementItem.id].amount) || 0;
+    const amount = investissementItems.reduce((s, it) => s + ((values_[it.id] && values_[it.id].amount) || 0), 0);
     invCumul += amount;
     invLabels.push(monthLabelShort(id));
     invValues.push(invCumul);
@@ -727,7 +1092,7 @@ async function renderAnalyse() {
   const balanceValues = [];
   months.forEach(({ id, data: d }) => {
     balanceLabels.push(monthLabelShort(id));
-    balanceValues.push(computeTotals(catalog, d).balance);
+    balanceValues.push(computeTotals(catalog, d, currentScope).balance);
   });
   charts.balance = new Chart($("#chart-balance"), {
     type: "line",
@@ -747,7 +1112,7 @@ async function renderAnalyse() {
 
   // Classement des postes occasionnels par coût total cumulé sur les mois passés + en cours
   // (les mois futurs ne sont que des prévisions, pas des dépenses réelles).
-  const occItems = catalog.items.filter((it) => it.type === "occasionnelles");
+  const occItems = catalog.items.filter((it) => it.type === "occasionnelles" && inScope(it, currentScope));
   const occTotals = {};
   occItems.forEach((it) => { occTotals[it.id] = 0; });
   months.filter(({ id }) => id <= currentMonthId).forEach(({ data: d }) => {
@@ -766,4 +1131,41 @@ async function renderAnalyse() {
     },
     options: { indexAxis: "y", plugins: { legend: { display: false } } }
   });
+
+  // ---- Graphes propres à la vue consolidée ----
+  if (currentScope === "famille") {
+    const people = OWNER_KEYS;
+    const colors = people.map(ownerColor);
+    const peopleLabels = people.map((k) => OWNER_LABEL[k]);
+
+    const incNow = people.map((k) => ownerExternalOf(data, k, "income"));
+    charts.famIncome = new Chart($("#chart-fam-income"), {
+      type: "doughnut",
+      data: { labels: peopleLabels, datasets: [{ data: incNow, backgroundColor: colors }] },
+      options: pieOptions(incNow)
+    });
+
+    const expNow = people.map((k) => ownerExternalOf(data, k, "expense"));
+    charts.famSplit = new Chart($("#chart-fam-split"), {
+      type: "doughnut",
+      data: { labels: peopleLabels, datasets: [{ data: expNow, backgroundColor: colors }] },
+      options: pieOptions(expNow)
+    });
+
+    charts.famStack = new Chart($("#chart-fam-stack"), {
+      type: "bar",
+      data: {
+        labels: months.map((m) => monthLabelShort(m.id)),
+        datasets: people.map((k, i) => ({
+          label: peopleLabels[i],
+          data: months.map((m) => ownerExternalOf(m.data, k, "expense")),
+          backgroundColor: colors[i]
+        }))
+      },
+      options: {
+        plugins: { legend: { position: "bottom" } },
+        scales: { x: { stacked: true }, y: { stacked: true } }
+      }
+    });
+  }
 }
