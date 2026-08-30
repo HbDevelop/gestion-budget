@@ -1113,15 +1113,22 @@ async function renderAnalyse() {
     options: pieOptions(avgData)
   });
 
+  // Réglages épargne/investissement : globaux par défaut (rétro-compat), surchargeables par
+  // espace via settings.byScope[<owner>] = { epargneBase, epargneStart, investissementBase,
+  // investissementStart }. La vue "Famille" garde les valeurs globales.
+  const sc = (currentScope !== "famille" && settings.byScope && settings.byScope[currentScope]) || {};
+  const epargneBase = sc.epargneBase != null ? sc.epargneBase : (settings.epargneBase || 0);
+  const epargneStart = sc.epargneStart || null;
+
   // Épargne cumulée = solde de départ + somme glissante de (Épargne du mois - Virement de
   // l'épargne du mois). L'Investissement n'entre pas en compte : c'est un poste distinct.
   // Les postes sont restreints à l'espace courant (plusieurs postes "épargne" possibles).
   const epargneItems = catalog.items.filter((it) => it.role === "epargne" && inScope(it, currentScope));
   const virementItems = catalog.items.filter((it) => it.role === "epargne_out" && inScope(it, currentScope));
-  let cumul = settings.epargneBase || 0;
+  let cumul = epargneBase;
   const labels = [];
   const values = [];
-  months.forEach(({ id, data: d }) => {
+  (epargneStart ? months.filter(({ id }) => id >= epargneStart) : months).forEach(({ id, data: d }) => {
     const values_ = d.values || {};
     const epargne = epargneItems.reduce((s, it) => s + ((values_[it.id] && values_[it.id].amount) || 0), 0);
     const virement = virementItems.reduce((s, it) => s + ((values_[it.id] && values_[it.id].amount) || 0), 0);
@@ -1138,8 +1145,8 @@ async function renderAnalyse() {
   // Investissement cumulé = solde de départ (à partir du mois configuré) + somme glissante
   // du poste Investissement, sans soustraction (pas de "retrait d'investissement" suivi).
   const investissementItems = catalog.items.filter((it) => it.role === "investissement" && inScope(it, currentScope));
-  const invStart = settings.investissementStart || "2026-08";
-  let invCumul = settings.investissementBase || 0;
+  const invStart = sc.investissementStart || settings.investissementStart || "2026-08";
+  let invCumul = sc.investissementBase != null ? sc.investissementBase : (settings.investissementBase || 0);
   const invLabels = [];
   const invValues = [];
   months.filter(({ id }) => id >= invStart).forEach(({ id, data: d }) => {
