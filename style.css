@@ -10,6 +10,11 @@
   --success: #059669;
   --radius: 10px;
   --shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04);
+
+  /* Couleurs des espaces budgétaires */
+  --c-commun: #2563eb;
+  --c-habib: #059669;
+  --c-marwa: #7c3aed;
 }
 
 * { box-sizing: border-box; }
@@ -302,3 +307,220 @@ body {
 .chart-card h3 { margin: 0 0 12px; font-size: 15px; }
 .chart-card { max-width: 100%; }
 .chart-card canvas { max-height: 320px; }
+
+/* ==================================================================
+   Espaces budgétaires : sélecteur + vue consolidée "Famille"
+   ================================================================== */
+
+/* Barre de sélection d'espace, transversale à toutes les vues */
+.scopebar {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  padding: 10px 20px;
+  background: var(--card-bg);
+  border-bottom: 1px solid var(--border);
+  flex-wrap: wrap;
+}
+.scopebar-lead {
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.07em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+}
+.segset {
+  display: flex;
+  gap: 4px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 999px;
+  padding: 3px;
+}
+.seg {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  border: none;
+  background: none;
+  color: var(--text-muted);
+  font: inherit;
+  font-size: 13px;
+  padding: 6px 14px;
+  border-radius: 999px;
+  cursor: pointer;
+}
+.seg:hover { color: var(--text); }
+.seg-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--text-muted); flex: none; }
+.seg-dot-fam { background: conic-gradient(var(--c-commun) 0 33%, var(--c-habib) 0 66%, var(--c-marwa) 0); }
+.seg.active {
+  background: var(--card-bg);
+  color: var(--text);
+  font-weight: 600;
+  box-shadow: var(--shadow);
+}
+.scope-hint { font-size: 12px; color: var(--text-muted); margin-left: auto; }
+@media (max-width: 640px) { .scope-hint { display: none; } }
+
+/* Cartes résumé du consolidé, avec ventilation par personne */
+.summary-fam { grid-template-columns: 1fr; }
+@media (min-width: 640px) { .summary-fam { grid-template-columns: repeat(3, 1fr); } }
+.summary-split {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 12px;
+  margin-top: 4px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.summary-split .k { display: inline-flex; align-items: center; gap: 5px; }
+.summary-split .k::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--oc, var(--text-muted));
+}
+.summary-split b { color: var(--text); font-weight: 600; }
+
+/* Encadré d'explication (neutralisation des virements internes) */
+.fam-note {
+  display: flex;
+  gap: 8px;
+  font-size: 12.5px;
+  line-height: 1.5;
+  color: var(--text-muted);
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  padding: 10px 13px;
+  margin-bottom: 16px;
+}
+.fam-note b { color: var(--text); font-weight: 600; }
+
+/* Tableau "temps réel par espace" */
+.fam-rt-table { width: 100%; border-collapse: collapse; margin-top: 4px; }
+.fam-rt-table th,
+.fam-rt-table td {
+  padding: 9px 10px;
+  text-align: right;
+  font-size: 13.5px;
+  border-bottom: 1px solid var(--border);
+}
+.fam-rt-table th:first-child,
+.fam-rt-table td:first-child { text-align: left; color: var(--text-muted); }
+.fam-rt-table thead th { font-weight: 700; }
+.fam-rt-table .own-chip { display: inline-flex; align-items: center; gap: 6px; }
+.fam-rt-table .own-chip::before {
+  content: "";
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--oc, var(--text-muted));
+}
+.fam-rt-table .fam-col { background: var(--bg); font-weight: 700; }
+.fam-rt-table tbody tr:last-child td { border-bottom: none; }
+.fam-rt-table td.negative { color: var(--danger); }
+.fam-rt-input {
+  width: 92px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  font: inherit;
+  font-size: 13px;
+  text-align: right;
+}
+@media (max-width: 640px) {
+  .fam-rt-table { display: block; overflow-x: auto; white-space: nowrap; }
+}
+
+/* Bloc par personne dans le Suivi consolidé */
+.person-block {
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  border-left: 3px solid var(--pc, var(--primary));
+  border-radius: var(--radius);
+  box-shadow: var(--shadow);
+  margin-bottom: 14px;
+  overflow: hidden;
+}
+.person-block .pb-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  padding: 11px 15px;
+  background: var(--pc-bg, var(--bg));
+  border-bottom: 1px solid var(--border);
+}
+.pb-head .pb-who {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 700;
+  font-size: 14.5px;
+}
+.pb-head .pb-who .pb-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 50%;
+  background: var(--pc, var(--primary));
+}
+.pb-head .pb-who small { font-weight: 500; color: var(--text-muted); font-size: 12px; }
+.pb-head .pb-bal { font-size: 13px; color: var(--text-muted); }
+.pb-head .pb-bal b { font-size: 15px; color: var(--text); }
+.pb-head .pb-bal b.negative { color: var(--danger); }
+.pb-body { padding: 4px 15px 13px; }
+.fam-row { grid-template-columns: 18px 1fr auto; }
+.fam-row .fam-amount { font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.paid-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  border: 1.5px solid var(--border);
+  justify-self: center;
+}
+.paid-dot.on { background: var(--success); border-color: var(--success); }
+.pb-cat {
+  display: block;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  padding: 12px 0 4px;
+}
+.pb-sub {
+  display: flex;
+  gap: 18px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+  padding-top: 10px;
+  border-top: 2px solid var(--border);
+  font-size: 13px;
+}
+.pb-sub b { font-weight: 700; }
+.pb-sub b.negative { color: var(--danger); }
+.pb-empty { color: var(--text-muted); font-size: 13px; padding: 10px 0; }
+
+/* Sélecteur d'espace du poste, dans la grille Prévisions */
+.owner-select {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 6px;
+  font-size: 12px;
+  background: var(--card-bg);
+  color: var(--text);
+  flex-shrink: 0;
+}
+.internal-check {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  font-size: 11px;
+  color: var(--text-muted);
+  flex-shrink: 0;
+  white-space: nowrap;
+}
+.internal-check input { width: 13px; height: 13px; }
