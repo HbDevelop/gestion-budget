@@ -860,7 +860,7 @@ function buildMonthGrid(table, ids, monthsByI, items, opts) {
   html += "</tr></thead><tbody>";
 
   SECTIONS.forEach((sec) => {
-    html += `<tr class="section-row"><td colspan="${ids.length + 1}">${sec.label}</td></tr>`;
+    html += `<tr class="section-row"><td colspan="${ids.length + 1}"><span class="section-label">${sec.label}</span></td></tr>`;
     items.filter((it) => it.type === sec.key).forEach((item) => {
       html += gridRow(item, ids, monthsByI, opts);
     });
