@@ -270,15 +270,14 @@ body {
 .forecast-table .section-row td { position: static; }
 /* le libellé de section reste collé à gauche au scroll horizontal (cellule fusionnée) */
 .forecast-table .section-label { position: sticky; left: 0; width: max-content; max-width: 100%; }
-/* Vue compacte (lecture / Historique) : on plafonne la colonne poste ; en mode
-   édition sur grand écran on la laisse s'élargir pour les contrôles. */
+/* Vue compacte (lecture / Historique) : colonne poste un peu plus resserrée. */
 .forecast-table.compact th:first-child,
 .forecast-table.compact td:first-child { max-width: 172px; }
-/* En colonne étroite, les longs libellés de sous-totaux/sections doivent s'enrouler
-   dans la cellule au lieu de déborder sur la colonne du 1er mois. */
-.forecast-table.compact .subtotal-row td:first-child,
-.forecast-table.compact .total-row td:first-child,
-.forecast-table.compact .section-row td {
+/* Les longs libellés de sous-totaux / sections s'enroulent dans la cellule au lieu
+   de déborder sur la colonne du 1er mois — dans les deux modes (lecture ET édition). */
+.forecast-table .subtotal-row td:first-child,
+.forecast-table .total-row td:first-child,
+.forecast-table .section-row td {
   white-space: normal;
   line-height: 1.2;
 }
