@@ -860,7 +860,7 @@ function buildMonthGrid(table, ids, monthsByI, items, opts) {
   html += "</tr></thead><tbody>";
 
   SECTIONS.forEach((sec) => {
-    html += `<tr class="section-row"><td colspan="${ids.length + 1}"><span class="section-label">${sec.label}</span></td></tr>`;
+    html += `<tr class="section-row"><td colspan="${ids.length + 1}"><span class="cell-label section-label">${sec.label}</span></td></tr>`;
     items.filter((it) => it.type === sec.key).forEach((item) => {
       html += gridRow(item, ids, monthsByI, opts);
     });
@@ -889,7 +889,7 @@ function gridRow(item, ids, monthsByI, opts) {
       </label>
       <button type="button" class="remove-item-btn" data-item-id="${item.id}" title="Supprimer ce poste">✕</button>`;
   } else {
-    row += `<span class="poste-label" title="${escapeAttr(item.label)}">${escapeHtml(item.label)}</span>`;
+    row += `<span class="cell-label poste-label" title="${escapeAttr(item.label)}">${escapeHtml(item.label)}</span>`;
   }
   row += `</td>`;
   ids.forEach((id) => {
@@ -907,7 +907,7 @@ function gridRow(item, ids, monthsByI, opts) {
 }
 
 function gridTotalRow(label, ids, monthsByI, getValue, strong) {
-  let row = `<tr class="${strong ? "total-row" : "subtotal-row"}"><td>${label}</td>`;
+  let row = `<tr class="${strong ? "total-row" : "subtotal-row"}"><td><span class="cell-label">${label}</span></td>`;
   ids.forEach((id) => {
     const t = computeTotals(catalog, monthsByI[id], currentScope);
     row += `<td>${euros(getValue(t))}</td>`;
