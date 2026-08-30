@@ -143,9 +143,8 @@ function inScope(item, scope) {
   return scope === "famille" || item.owner === scope;
 }
 
-// Solde bancaire : nouveau format { habib, marwa }. L'ancien format (un seul nombre) est
-// rattaché à l'espace de repli et converti à la première écriture, puis réaffectable via
-// l'outil "attribution en masse" de Prévisions.
+// Solde bancaire : format { habib, marwa }. L'ancien format (un seul nombre) est rattaché à
+// l'espace de repli et converti à la première écriture ; en vue "Famille" on somme tout.
 function bankBalancesOf(data) {
   if (!data) return {};
   if (data.bankBalances && typeof data.bankBalances === "object") return data.bankBalances;
@@ -162,13 +161,13 @@ function bankFor(data, scope) {
   return bankBalancesOf(data)[scope] || 0;
 }
 
-// Montant d'un espace avec l'extérieur du foyer (hors virements internes), pour un mois donné.
+// Somme des postes d'un espace (revenus ou dépenses) pour un mois donné.
 // `kind` vaut "income" ou "expense". Sert à la ventilation et aux graphes consolidés.
-function ownerExternalOf(data, scope, kind) {
+function ownerKindSum(data, scope, kind) {
   if (!catalog) return 0;
   const values = (data && data.values) || {};
   return catalog.items.reduce((s, it) => {
-    if (it.owner !== scope || it.internal) return s;
+    if (it.owner !== scope) return s;
     const isIncome = it.type === "income";
     if (kind === "income" && !isIncome) return s;
     if (kind === "expense" && isIncome) return s;
@@ -183,9 +182,6 @@ function computeTotals(cat, data, scope = "famille") {
   let chargesAVenir = 0;
   cat.items.forEach((item) => {
     if (!inScope(item, scope)) return;
-    // Dans le consolidé, les transferts internes au foyer (ex. un remboursement de Habib
-    // à Marwa) s'annulent : on ne compte que les flux avec l'extérieur.
-    if (scope === "famille" && item.internal) return;
     const v = values[item.id];
     const amount = (v && v.amount) || 0;
     if (item.type === "income") {
@@ -406,15 +402,6 @@ async function normalizeCatalogOwners() {
     }
   });
   if (changed) await persistCatalog(catalog);
-}
-
-async function setItemInternal(itemId, internal) {
-  const item = catalog.items.find((it) => it.id === itemId);
-  if (!item) return;
-  if (internal) item.internal = true;
-  else delete item.internal;
-  await persistCatalog(catalog);
-  await renderForecast();
 }
 
 // Postes actuellement listés dans Prévisions (actifs, filtrés par l'espace affiché).
@@ -641,17 +628,10 @@ function renderFamilleSuivi() {
   summary.appendChild(soldeCard);
   suiviFamille.appendChild(summary);
 
-  // 2. Rappel : les transferts internes au foyer sont neutralisés dans le consolidé
-  suiviFamille.appendChild(el("div", "fam-note",
-    "<span>&#8505;</span><span>Les <b>transferts entre Habib et Marwa</b> (postes marqués " +
-    "« interne » dans Prévisions, ex. un remboursement) sont neutralisés ici : le consolidé " +
-    "ne compte que les flux avec l'extérieur du foyer. Chaque espace, lui, les voit comme un " +
-    "vrai mouvement.</span>"));
-
-  // 3. Suivi temps réel par espace
+  // 2. Suivi temps réel par espace
   suiviFamille.appendChild(famRealtimePanel(days));
 
-  // 4. Un bloc par espace
+  // 3. Un bloc par espace
   OWNER_KEYS.forEach((owner) => suiviFamille.appendChild(famPersonBlock(owner)));
 }
 
@@ -662,7 +642,7 @@ function famSummaryCard(label, value, kind) {
   if (kind) {
     const split = el("div", "summary-split");
     OWNER_KEYS.forEach((k) => {
-      const v = ownerExternalOf(monthData, k, kind);
+      const v = ownerKindSum(monthData, k, kind);
       if (!v) return;
       const chip = el("span", "k", `${OWNER_LABEL[k]}&nbsp;<b>${euros(v)}</b>`);
       chip.style.setProperty("--oc", ownerColor(k));
@@ -821,9 +801,6 @@ function gridRow(item, ids, monthsByI, opts) {
   let row = `<tr><td class="poste-cell">`;
   if (opts.structural) {
     row += `<input type="text" class="rename-input" value="${escapeAttr(item.label)}" data-item-id="${item.id}" />
-      <label class="internal-check" title="Flux interne au foyer (remboursement entre Habib et Marwa) : neutralisé dans le consolidé">
-        <input type="checkbox" class="internal-toggle" data-item-id="${item.id}"${item.internal ? " checked" : ""} /> interne
-      </label>
       <button type="button" class="remove-item-btn" data-item-id="${item.id}" title="Supprimer ce poste">✕</button>`;
   } else {
     row += `<span class="cell-label poste-label" title="${escapeAttr(item.label)}">${escapeHtml(item.label)}</span>`;
@@ -895,9 +872,6 @@ async function renderForecast() {
   });
   forecastTable.querySelectorAll(".rename-input").forEach((input) => {
     input.addEventListener("change", () => renameItem(input.dataset.itemId, input.value));
-  });
-  forecastTable.querySelectorAll(".internal-toggle").forEach((cb) => {
-    cb.addEventListener("change", () => setItemInternal(cb.dataset.itemId, cb.checked));
   });
   forecastTable.querySelectorAll(".remove-item-btn").forEach((btn) => {
     btn.addEventListener("click", () => removeItem(btn.dataset.itemId, ids, monthsByI));
@@ -1160,14 +1134,14 @@ async function renderAnalyse() {
     const colors = people.map(ownerColor);
     const peopleLabels = people.map((k) => OWNER_LABEL[k]);
 
-    const incNow = people.map((k) => ownerExternalOf(data, k, "income"));
+    const incNow = people.map((k) => ownerKindSum(data, k, "income"));
     charts.famIncome = new Chart($("#chart-fam-income"), {
       type: "doughnut",
       data: { labels: peopleLabels, datasets: [{ data: incNow, backgroundColor: colors }] },
       options: pieOptions(incNow)
     });
 
-    const expNow = people.map((k) => ownerExternalOf(data, k, "expense"));
+    const expNow = people.map((k) => ownerKindSum(data, k, "expense"));
     charts.famSplit = new Chart($("#chart-fam-split"), {
       type: "doughnut",
       data: { labels: peopleLabels, datasets: [{ data: expNow, backgroundColor: colors }] },
@@ -1180,7 +1154,7 @@ async function renderAnalyse() {
         labels: months.map((m) => monthLabelShort(m.id)),
         datasets: people.map((k, i) => ({
           label: peopleLabels[i],
-          data: months.map((m) => ownerExternalOf(m.data, k, "expense")),
+          data: months.map((m) => ownerKindSum(m.data, k, "expense")),
           backgroundColor: colors[i]
         }))
       },
