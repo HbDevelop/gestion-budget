@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Gestion Budget</title>
-  <link rel="stylesheet" href="style.css?v=3" />
+  <link rel="stylesheet" href="style.css?v=5" />
   <script src="https://accounts.google.com/gsi/client" async defer></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 </head>
@@ -43,6 +43,13 @@
       </div>
     </header>
 
+    <!-- Sélecteur d'espace : axe transversal à toutes les vues -->
+    <div class="scopebar">
+      <span class="scopebar-lead">Espace</span>
+      <div id="scope-switch" class="segset" role="tablist" aria-label="Espace budgétaire"></div>
+      <span id="scope-hint" class="scope-hint"></span>
+    </div>
+
     <!-- Vue : Suivi du mois -->
     <div id="view-suivi" class="view">
       <div class="month-nav">
@@ -56,6 +63,7 @@
       </div>
 
       <main class="content">
+       <div id="suivi-individual">
         <section class="summary">
           <div class="summary-card">
             <span class="summary-label">Revenus</span>
@@ -107,6 +115,10 @@
         </section>
 
         <div id="groups-container"></div>
+       </div>
+
+       <!-- Vue consolidée du foyer (espace "Famille") -->
+       <div id="suivi-famille" class="hidden"></div>
       </main>
     </div>
 
@@ -115,6 +127,12 @@
       <main class="content wide">
         <h2 class="view-title">Prévisions sur 12 mois</h2>
         <p class="view-subtitle">Ajoutez, renommez ou supprimez un poste ici — ça se répercute sur Suivi et Historique. Modifiez un montant directement dans la grille : le mois correspondant est créé automatiquement si besoin.</p>
+        <div class="bulk-owner">
+          <span>Attribuer <b id="bulk-owner-count">les postes affichés</b> à</span>
+          <select id="bulk-owner-select"></select>
+          <label><input type="checkbox" id="bulk-owner-banks" /> déplacer aussi les soldes bancaires de tous les mois</label>
+          <button id="bulk-owner-apply" class="btn small">Appliquer</button>
+        </div>
         <div class="table-scroll">
           <table id="forecast-table" class="forecast-table"></table>
         </div>
@@ -136,6 +154,20 @@
     <div id="view-analyse" class="view hidden">
       <main class="content">
         <h2 class="view-title">Analyse — <span id="analyse-month-label"></span></h2>
+        <div id="analyse-famille" class="charts-grid hidden">
+          <section class="card chart-card">
+            <h3>Contribution aux revenus du foyer</h3>
+            <canvas id="chart-fam-income"></canvas>
+          </section>
+          <section class="card chart-card">
+            <h3>Dépenses du foyer par personne (mois en cours)</h3>
+            <canvas id="chart-fam-split"></canvas>
+          </section>
+          <section class="card chart-card chart-wide">
+            <h3>Dépenses par personne, mois par mois</h3>
+            <canvas id="chart-fam-stack"></canvas>
+          </section>
+        </div>
         <div class="charts-grid">
           <section class="card chart-card">
             <h3>Répartition globale (mois en cours)</h3>
@@ -166,6 +198,6 @@
     </div>
   </div>
 
-  <script type="module" src="app.js?v=13"></script>
+  <script type="module" src="app.js?v=15"></script>
 </body>
 </html>
