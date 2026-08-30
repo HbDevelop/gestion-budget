@@ -34,6 +34,29 @@ les dépenses (groupées par catégorie, avec statut payé/non payé) et l'épar
 Un nouveau mois peut être créé en dupliquant le mois précédent (montants et
 libellés repris, cases "payé" réinitialisées).
 
+## Espaces (Commun / Habib / Marwa / Famille)
+
+Chaque poste du catalogue porte un champ `owner` (`commun`, `habib` ou `marwa`,
+définis dans `SPACES` de `firebase-config.js`). Le sélecteur d'espace en haut de
+l'app filtre toutes les vues :
+
+- **Commun / Habib / Marwa** — uniquement les postes de cet espace, avec son
+  propre solde bancaire et sa propre allocation journalière.
+- **Famille** — vue consolidée : cartes résumé ventilées par personne, tableau
+  temps réel par espace, un bloc par personne, et graphes de répartition dédiés.
+
+Le solde bancaire du mois est stocké par espace :
+`months/AAAA-MM.bankBalances` = `{ commun, habib, marwa }`. L'ancien format
+(`bankBalance`, un seul nombre) est lu comme « tout sur le compte commun » et
+converti au premier enregistrement.
+
+Un poste marqué `internal: true` (virement entre espaces, ex. « Virement →
+commun ») est compté normalement dans son espace mais **neutralisé dans le
+consolidé**, pour ne pas compter deux fois l'argent qui circule dans le foyer.
+
+Migration : les postes sans `owner` sont rattachés à `commun` au chargement
+(`normalizeCatalogOwners`). Les règles Firestore sont inchangées.
+
 ## Développement local
 
 Comme il s'agit de modules JS natifs (`type="module"`), il faut servir les
