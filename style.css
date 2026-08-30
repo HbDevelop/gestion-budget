@@ -11,8 +11,7 @@
   --radius: 10px;
   --shadow: 0 1px 3px rgba(0, 0, 0, 0.08), 0 1px 2px rgba(0, 0, 0, 0.04);
 
-  /* Couleurs des espaces budgétaires */
-  --c-commun: #2563eb;
+  /* Couleurs des espaces budgétaires (doivent suivre OWNER_COLOR dans app.js) */
   --c-habib: #059669;
   --c-marwa: #7c3aed;
 }
@@ -352,7 +351,7 @@ body {
 }
 .seg:hover { color: var(--text); }
 .seg-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--text-muted); flex: none; }
-.seg-dot-fam { background: conic-gradient(var(--c-commun) 0 33%, var(--c-habib) 0 66%, var(--c-marwa) 0); }
+.seg-dot-fam { background: conic-gradient(var(--c-habib) 0 50%, var(--c-marwa) 0); }
 .seg.active {
   background: var(--card-bg);
   color: var(--text);
