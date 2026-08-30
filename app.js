@@ -22,14 +22,19 @@ const GROUPS = [
 const SECTIONS = [{ key: "income", label: "Revenus" }, ...GROUPS];
 
 // ---- Espaces budgétaires (voir firebase-config.js) ----
-// Chaque poste porte un `owner` ∈ OWNER_KEYS. "commun" = pot commun du foyer, les autres
-// = budget perso. La vue "Famille" (scope "famille") consolide les trois espaces.
+// Un espace par personne. Chaque poste porte un `owner` ∈ OWNER_KEYS.
+// La vue "Famille" (scope "famille") consolide les espaces.
 const OWNER_KEYS = SPACES.map((s) => s.key);
 const OWNER_LABEL = Object.fromEntries(SPACES.map((s) => [s.key, s.label]));
 const FALLBACK_COLORS = ["#2563eb", "#059669", "#7c3aed", "#d97706", "#db2777"];
-const OWNER_COLOR = Object.fromEntries(SPACES.map((s, i) => [s.key, s.color || FALLBACK_COLORS[i % FALLBACK_COLORS.length]]));
-const OWNER_BG = { commun: "#eef4ff", habib: "#ecfdf5", marwa: "#f5f0ff" };
+const NAMED_COLORS = { habib: "#059669", marwa: "#7c3aed" };
+const NAMED_BG = { habib: "#ecfdf5", marwa: "#f5f0ff" };
+const OWNER_COLOR = Object.fromEntries(SPACES.map((s, i) => [s.key, s.color || NAMED_COLORS[s.key] || FALLBACK_COLORS[i % FALLBACK_COLORS.length]]));
+const OWNER_BG = Object.fromEntries(SPACES.map((s) => [s.key, NAMED_BG[s.key] || "#eef4ff"]));
 const DEFAULT_SCOPE = "famille";
+// Espace de repli quand un poste n'a pas encore d'owner valide (ancienne donnée, catalogue
+// par défaut). L'utilisateur réaffecte ensuite depuis Prévisions (à l'unité ou en masse).
+const FALLBACK_OWNER = OWNER_KEYS[0];
 function ownerColor(key) { return OWNER_COLOR[key] || "#6b7280"; }
 function ownerBg(key) { return OWNER_BG[key] || "#f4f6f8"; }
 
@@ -38,7 +43,7 @@ function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return n
 function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* ignoré */ } }
 
 // Un poste appartient à un seul espace. Les postes du catalogue par défaut démarrent sur
-// "commun" ; on réaffecte ensuite chaque poste à son espace depuis l'écran Prévisions.
+// le premier espace ; on réaffecte ensuite chaque poste depuis l'écran Prévisions.
 const DEFAULT_CATALOG = () => ({
   items: [
     { id: uid(), label: "Salaire", type: "income", retiredAt: null },
@@ -74,7 +79,7 @@ const DEFAULT_CATALOG = () => ({
     { id: uid(), label: "Amendes", type: "occasionnelles", retiredAt: null },
     { id: uid(), label: "Épargne", type: "capital", retiredAt: null, role: "epargne" },
     { id: uid(), label: "Investissement", type: "capital", retiredAt: null, role: "investissement" }
-  ].map((it) => ({ owner: "commun", ...it }))
+  ].map((it) => ({ owner: FALLBACK_OWNER, ...it }))
 });
 
 function uid() {
@@ -138,18 +143,23 @@ function inScope(item, scope) {
   return scope === "famille" || item.owner === scope;
 }
 
-// Solde bancaire : nouveau format { commun, habib, marwa }. L'ancien format (un seul nombre)
-// est traité comme "tout sur le compte commun" et converti à la première écriture.
+// Solde bancaire : nouveau format { habib, marwa }. L'ancien format (un seul nombre) est
+// rattaché à l'espace de repli et converti à la première écriture, puis réaffectable via
+// l'outil "attribution en masse" de Prévisions.
 function bankBalancesOf(data) {
   if (!data) return {};
   if (data.bankBalances && typeof data.bankBalances === "object") return data.bankBalances;
-  if (typeof data.bankBalance === "number") return { commun: data.bankBalance };
+  if (typeof data.bankBalance === "number") return { [FALLBACK_OWNER]: data.bankBalance };
   return {};
 }
+// Somme de tous les soldes bancaires du mois, quelle que soit la clé — y compris d'anciens
+// seaux orphelins (ex. "commun") pas encore réaffectés à une personne.
+function sumBankBalances(data) {
+  return Object.values(bankBalancesOf(data)).reduce((s, v) => s + (typeof v === "number" ? v : 0), 0);
+}
 function bankFor(data, scope) {
-  const b = bankBalancesOf(data);
-  if (scope === "famille") return OWNER_KEYS.reduce((s, k) => s + (b[k] || 0), 0);
-  return b[scope] || 0;
+  if (scope === "famille") return sumBankBalances(data);
+  return bankBalancesOf(data)[scope] || 0;
 }
 
 // Montant d'un espace avec l'extérieur du foyer (hors virements internes), pour un mois donné.
@@ -173,8 +183,8 @@ function computeTotals(cat, data, scope = "famille") {
   let chargesAVenir = 0;
   cat.items.forEach((item) => {
     if (!inScope(item, scope)) return;
-    // Dans le consolidé, les virements internes au foyer (ex. "Virement → commun")
-    // s'annulent : on ne compte que les flux avec l'extérieur.
+    // Dans le consolidé, les transferts internes au foyer (ex. un remboursement de Habib
+    // à Marwa) s'annulent : on ne compte que les flux avec l'extérieur.
     if (scope === "famille" && item.internal) return;
     const v = values[item.id];
     const amount = (v && v.amount) || 0;
@@ -246,7 +256,6 @@ const SCOPE_TABS = [{ key: "famille", label: "Famille" }, ...SPACES.map((s) => (
 
 function scopeHintText(scope) {
   if (scope === "famille") return "Vue consolidée du foyer";
-  if (scope === "commun") return "Compte commun : charges partagées du foyer";
   return "Budget personnel de " + (OWNER_LABEL[scope] || scope);
 }
 
@@ -382,13 +391,14 @@ async function persistCatalog(cat) {
   await setDoc(doc(db, "meta", "catalog"), cat);
 }
 
-// Migration douce : tout poste sans `owner` (ou avec un owner inconnu) est rattaché au
-// compte commun. On ne réécrit le catalogue que si quelque chose a changé.
+// Migration douce : tout poste sans `owner` (ou avec un owner inconnu, ex. ancien "commun")
+// est rattaché à l'espace de repli. On ne réécrit le catalogue que si quelque chose a changé.
+// L'utilisateur répartit ensuite les postes entre les personnes depuis Prévisions.
 async function normalizeCatalogOwners() {
   let changed = false;
   catalog.items.forEach((it) => {
     if (!OWNER_KEYS.includes(it.owner)) {
-      it.owner = "commun";
+      it.owner = FALLBACK_OWNER;
       changed = true;
     }
   });
@@ -442,8 +452,7 @@ async function bulkAssignOwner(targetOwner, moveBanks) {
       const all = await fetchAllMonthsAsc();
       for (const { id, data } of all) {
         if (data.bankBalances == null && data.bankBalance == null) continue;
-        const b = bankBalancesOf(data);
-        const total = OWNER_KEYS.reduce((s, k) => s + (b[k] || 0), 0);
+        const total = sumBankBalances(data);
         const next = { ...data, bankBalances: { [targetOwner]: total } };
         delete next.bankBalance;
         await persistMonth(id, { ...next, updatedAt: new Date().toISOString(), updatedBy: currentUser.email });
@@ -679,11 +688,12 @@ function renderFamilleSuivi() {
   summary.appendChild(soldeCard);
   suiviFamille.appendChild(summary);
 
-  // 2. Rappel : les virements entre espaces sont neutralisés dans le consolidé
+  // 2. Rappel : les transferts internes au foyer sont neutralisés dans le consolidé
   suiviFamille.appendChild(el("div", "fam-note",
-    "<span>&#8505;</span><span>Les <b>virements entre espaces</b> (marqués « interne » dans Prévisions) " +
-    "sont neutralisés ici : le consolidé ne compte que les flux avec l'extérieur du foyer. " +
-    "Chaque espace, lui, voit son virement comme un vrai mouvement.</span>"));
+    "<span>&#8505;</span><span>Les <b>transferts entre Habib et Marwa</b> (postes marqués " +
+    "« interne » dans Prévisions, ex. un remboursement) sont neutralisés ici : le consolidé " +
+    "ne compte que les flux avec l'extérieur du foyer. Chaque espace, lui, les voit comme un " +
+    "vrai mouvement.</span>"));
 
   // 3. Suivi temps réel par espace
   suiviFamille.appendChild(famRealtimePanel(days));
@@ -716,7 +726,7 @@ function famRealtimePanel(days) {
 
   const totals = {};
   OWNER_KEYS.forEach((k) => { totals[k] = computeTotals(catalog, monthData, k); });
-  const famBank = OWNER_KEYS.reduce((s, k) => s + totals[k].bankBalance, 0);
+  const famBank = sumBankBalances(monthData);
   const famUpcoming = OWNER_KEYS.reduce((s, k) => s + totals[k].chargesAVenir, 0);
   const famReste = OWNER_KEYS.reduce((s, k) => s + totals[k].resteAVivreReel, 0);
 
@@ -786,7 +796,7 @@ function famPersonBlock(owner) {
 
   const head = el("div", "pb-head");
   const who = el("span", "pb-who",
-    `<span class="pb-dot"></span>${OWNER_LABEL[owner]} <small>${owner === "commun" ? "compte commun" : "compte perso"}</small>`);
+    `<span class="pb-dot"></span>${OWNER_LABEL[owner]} <small>budget perso</small>`);
   const bal = el("span", "pb-bal", `Solde <b class="${t.balance < 0 ? "negative" : ""}">${euros(t.balance)}</b>`);
   head.append(who, bal);
   block.appendChild(head);
@@ -971,9 +981,9 @@ async function setForecastValue(targetMonthId, itemId, value, monthsByI) {
 async function addItem(type) {
   const label = prompt("Nom du nouveau poste :");
   if (!label || !label.trim()) return;
-  let owner = currentScope === "famille" ? "commun" : currentScope;
+  let owner = currentScope === "famille" ? FALLBACK_OWNER : currentScope;
   if (currentScope === "famille") {
-    const ans = (prompt("À quel espace ? " + OWNER_KEYS.join(" / "), "commun") || "").trim().toLowerCase();
+    const ans = (prompt("À quel espace ? " + OWNER_KEYS.join(" / "), FALLBACK_OWNER) || "").trim().toLowerCase();
     if (OWNER_KEYS.includes(ans)) owner = ans;
   }
   catalog.items.push({ id: uid(), label: label.trim(), type, owner, retiredAt: null });
