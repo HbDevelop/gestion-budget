@@ -17,15 +17,15 @@ export const AUTHORIZED_EMAILS = [
   "elghoulmarwaem@gmail.com"
 ];
 
-// Espaces budgétaires du foyer. Chaque poste du catalogue porte un `owner` qui vaut
-// l'une de ces clés. "commun" = le pot commun (loyer, courses…), les autres = le budget
-// perso de chacun. La vue "Famille" consolide les trois. `email` sert juste à
-// pré-sélectionner le bon espace à la connexion — ça ne restreint rien (chaque compte
-// autorisé peut voir et éditer tous les espaces).
+// Espaces budgétaires du foyer : un par personne. Chaque poste du catalogue porte un
+// `owner` qui vaut l'une de ces clés. La vue "Famille" consolide les espaces.
+// `email` sert juste à pré-sélectionner le bon espace à la connexion — ça ne restreint
+// rien (chaque compte autorisé peut voir et éditer tous les espaces).
+// Pour ajouter une personne : ajouter une entrée ici (+ une couleur dans OWNER_COLOR
+// de app.js si on veut autre chose que la palette par défaut).
 export const SPACES = [
-  { key: "commun", label: "Commun" },
-  { key: "habib",  label: "Habib", email: "boudriga.habib@gmail.com" },
-  { key: "marwa",  label: "Marwa", email: "elghoulmarwaem@gmail.com" }
+  { key: "habib", label: "Habib", email: "boudriga.habib@gmail.com" },
+  { key: "marwa", label: "Marwa", email: "elghoulmarwaem@gmail.com" }
 ];
 
 // ID client OAuth Web du provider Google (Firebase Auth > Sign-in method > Google >

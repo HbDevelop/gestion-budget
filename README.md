@@ -34,28 +34,39 @@ les dépenses (groupées par catégorie, avec statut payé/non payé) et l'épar
 Un nouveau mois peut être créé en dupliquant le mois précédent (montants et
 libellés repris, cases "payé" réinitialisées).
 
-## Espaces (Commun / Habib / Marwa / Famille)
+## Espaces (Habib / Marwa / Famille)
 
-Chaque poste du catalogue porte un champ `owner` (`commun`, `habib` ou `marwa`,
-définis dans `SPACES` de `firebase-config.js`). Le sélecteur d'espace en haut de
-l'app filtre toutes les vues :
+Un espace par personne. Chaque poste du catalogue porte un champ `owner`
+(`habib` ou `marwa`, définis dans `SPACES` de `firebase-config.js`). Le sélecteur
+d'espace en haut de l'app filtre toutes les vues :
 
-- **Commun / Habib / Marwa** — uniquement les postes de cet espace, avec son
-  propre solde bancaire et sa propre allocation journalière.
+- **Habib / Marwa** — uniquement les postes de cette personne, avec son propre
+  solde bancaire et sa propre allocation journalière.
 - **Famille** — vue consolidée : cartes résumé ventilées par personne, tableau
   temps réel par espace, un bloc par personne, et graphes de répartition dédiés.
 
+Une charge partagée (loyer, courses…) est simplement attribuée à la personne qui
+la paie ; si on veut la voir répartie, on crée deux postes (une part par
+personne).
+
 Le solde bancaire du mois est stocké par espace :
-`months/AAAA-MM.bankBalances` = `{ commun, habib, marwa }`. L'ancien format
-(`bankBalance`, un seul nombre) est lu comme « tout sur le compte commun » et
-converti au premier enregistrement.
+`months/AAAA-MM.bankBalances` = `{ habib, marwa }`. L'ancien format
+(`bankBalance`, un seul nombre) est rattaché à l'espace de repli et converti au
+premier enregistrement.
 
-Un poste marqué `internal: true` (virement entre espaces, ex. « Virement →
-commun ») est compté normalement dans son espace mais **neutralisé dans le
-consolidé**, pour ne pas compter deux fois l'argent qui circule dans le foyer.
+Un poste marqué `internal: true` (transfert entre les deux, ex. un remboursement)
+est compté normalement dans chaque espace mais **neutralisé dans le consolidé**,
+pour ne pas compter deux fois l'argent qui circule dans le foyer.
 
-Migration : les postes sans `owner` sont rattachés à `commun` au chargement
-(`normalizeCatalogOwners`). Les règles Firestore sont inchangées.
+### Reprise / migration
+
+- Les postes sans `owner` (ou avec un ancien `owner: "commun"`) sont rattachés à
+  l'espace de repli (`OWNER_KEYS[0]`) au chargement (`normalizeCatalogOwners`).
+- L'écran **Prévisions** a une barre « Attribuer les N postes à `<espace>` » :
+  en scope **Famille** elle réaffecte tout le catalogue en un clic, avec une
+  option pour déplacer aussi le solde bancaire de chaque mois. On répartit
+  ensuite au cas par cas via le menu déroulant de chaque ligne.
+- Les règles Firestore sont inchangées.
 
 ## Développement local
 
