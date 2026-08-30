@@ -330,7 +330,6 @@ body {
 /* Barre d'action au-dessus de la grille Prévisions */
 .prev-toolbar { max-width: 1100px; margin: 0 auto 12px; padding: 0 16px; }
 .btn.small.active { background: var(--primary); border-color: var(--primary); color: #fff; }
-.bulk-owner[hidden] { display: none; }
 .rename-input:hover, .rename-input:focus { border-color: var(--border); background: var(--card-bg); }
 .remove-item-btn {
   border: none;
@@ -575,16 +574,7 @@ body {
 .pb-sub b.negative { color: var(--danger); }
 .pb-empty { color: var(--text-muted); font-size: 13px; padding: 10px 0; }
 
-/* Sélecteur d'espace du poste, dans la grille Prévisions */
-.owner-select {
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 4px 6px;
-  font-size: 12px;
-  background: var(--card-bg);
-  color: var(--text);
-  flex-shrink: 0;
-}
+/* Case "interne" dans la grille Prévisions (mode édition) */
 .internal-check {
   display: inline-flex;
   align-items: center;
@@ -595,26 +585,3 @@ body {
   white-space: nowrap;
 }
 .internal-check input { width: 13px; height: 13px; }
-
-/* Barre d'attribution en masse (Prévisions) */
-.bulk-owner {
-  max-width: 1100px;
-  margin: 0 auto 16px;
-  padding: 10px 16px;
-  display: flex;
-  align-items: center;
-  gap: 10px 14px;
-  flex-wrap: wrap;
-  font-size: 13px;
-  color: var(--text-muted);
-}
-.bulk-owner b { color: var(--text); font-weight: 600; }
-.bulk-owner label { display: inline-flex; align-items: center; gap: 5px; }
-.bulk-owner select {
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 5px 8px;
-  font-size: 13px;
-  background: var(--card-bg);
-  color: var(--text);
-}
