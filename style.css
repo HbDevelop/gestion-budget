@@ -222,7 +222,10 @@ body {
 }
 
 .forecast-table {
-  border-collapse: collapse;
+  /* separate + border-spacing:0 : indispensable pour que position:sticky fonctionne
+     de façon fiable sur les cellules (bug connu de Chrome avec border-collapse). */
+  border-collapse: separate;
+  border-spacing: 0;
   background: var(--card-bg);
   white-space: nowrap;
 }
@@ -232,14 +235,31 @@ body {
   border-bottom: 1px solid var(--border);
   font-size: 13px;
 }
-.forecast-table th { position: sticky; top: 0; background: var(--card-bg); text-transform: capitalize; }
-.forecast-table th:first-child, .forecast-table td:first-child {
+/* En-tête collé en haut (au-dessus des cellules de corps) */
+.forecast-table th {
+  position: sticky;
+  top: 0;
+  z-index: 3;
+  background: var(--card-bg);
+  text-transform: capitalize;
+}
+/* 1re colonne collée à gauche — pour TOUTES les lignes, y compris les sous-totaux,
+   sinon leurs libellés se décalent au défilement horizontal. */
+.forecast-table th:first-child,
+.forecast-table td:first-child,
+.forecast-table .subtotal-row td:first-child,
+.forecast-table .total-row td:first-child {
   position: sticky;
   left: 0;
+  z-index: 2;
   background: var(--card-bg);
-  min-width: 130px;
-  z-index: 1;
 }
+.forecast-table th:first-child, .forecast-table td:first-child { min-width: 130px; }
+/* Coin haut-gauche : au-dessus de l'en-tête ET de la colonne collée */
+.forecast-table th:first-child { z-index: 4; }
+/* Ligne de section (cellule fusionnée) : le libellé reste collé à gauche au scroll horizontal */
+.forecast-table .section-row td { position: static; }
+.forecast-table .section-label { position: sticky; left: 0; display: inline-block; }
 /* Vue compacte (lecture / Historique) : on plafonne la colonne poste ; en mode
    édition sur grand écran on la laisse s'élargir pour les contrôles. */
 .forecast-table.compact th:first-child,
@@ -264,17 +284,15 @@ body {
   background: #1c2331;
   color: white;
   font-weight: 600;
-  position: static;
 }
 .forecast-table .subtotal-row td {
   background: #dde3ea;
   font-weight: 700;
-  position: static;
   border-top: 2px solid var(--border);
   border-bottom: 2px solid var(--border);
 }
 .forecast-table .subtotal-row td:first-child { background: #dde3ea; }
-.forecast-table .total-row td { background: #eff6ff; font-weight: 700; position: static; }
+.forecast-table .total-row td { background: #eff6ff; font-weight: 700; }
 .forecast-table .total-row td:first-child { background: #eff6ff; }
 .forecast-input {
   width: 90px;
