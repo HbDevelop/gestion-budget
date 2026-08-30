@@ -249,11 +249,6 @@ const scopeHint = $("#scope-hint");
 const suiviIndividual = $("#suivi-individual");
 const suiviFamille = $("#suivi-famille");
 const analyseFamille = $("#analyse-famille");
-const bulkOwner = $("#bulk-owner");
-const bulkOwnerSelect = $("#bulk-owner-select");
-const bulkOwnerCount = $("#bulk-owner-count");
-const bulkOwnerBanks = $("#bulk-owner-banks");
-const bulkOwnerApply = $("#bulk-owner-apply");
 const forecastEditToggle = $("#forecast-edit-toggle");
 
 // ---- Sélecteur d'espace ----
@@ -366,15 +361,10 @@ document.querySelectorAll(".nav-btn").forEach((btn) => {
   btn.addEventListener("click", () => switchView(btn.dataset.view));
 });
 
-// ---- Attribution en masse (migration / rééquilibrage depuis Prévisions) ----
-bulkOwnerSelect.innerHTML = OWNER_KEYS.map((k) => `<option value="${k}">${OWNER_LABEL[k]}</option>`).join("");
-bulkOwnerApply.addEventListener("click", () => bulkAssignOwner(bulkOwnerSelect.value, bulkOwnerBanks.checked));
-
 forecastEditToggle.addEventListener("click", () => {
   forecastEdit = !forecastEdit;
   forecastEditToggle.textContent = forecastEdit ? "✓ Terminé" : "✏️ Modifier les postes";
   forecastEditToggle.classList.toggle("active", forecastEdit);
-  bulkOwner.hidden = !forecastEdit;
   renderForecast();
 });
 
@@ -418,14 +408,6 @@ async function normalizeCatalogOwners() {
   if (changed) await persistCatalog(catalog);
 }
 
-async function setItemOwner(itemId, owner) {
-  const item = catalog.items.find((it) => it.id === itemId);
-  if (!item || !OWNER_KEYS.includes(owner) || item.owner === owner) return;
-  item.owner = owner;
-  await persistCatalog(catalog);
-  await renderForecast();
-}
-
 async function setItemInternal(itemId, internal) {
   const item = catalog.items.find((it) => it.id === itemId);
   if (!item) return;
@@ -438,48 +420,6 @@ async function setItemInternal(itemId, internal) {
 // Postes actuellement listés dans Prévisions (actifs, filtrés par l'espace affiché).
 function forecastListedItems() {
   return catalog.items.filter((it) => !it.retiredAt && inScope(it, currentScope));
-}
-
-// Attribue en masse tous les postes listés à un espace. Sert surtout à la reprise
-// initiale : "tout ce budget est celui de Marwa" → un clic, au lieu de 30 menus.
-// Option `moveBanks` : regroupe aussi le solde bancaire de CHAQUE mois sur cet espace.
-async function bulkAssignOwner(targetOwner, moveBanks) {
-  if (!OWNER_KEYS.includes(targetOwner)) return;
-  const listed = forecastListedItems();
-  const toChange = listed.filter((it) => it.owner !== targetOwner);
-
-  let msg = `Attribuer ${toChange.length} poste(s) à « ${OWNER_LABEL[targetOwner]} » ?`;
-  if (!toChange.length) msg = `Tous les postes affichés sont déjà attribués à « ${OWNER_LABEL[targetOwner]} ».`;
-  if (moveBanks) msg += `\n\nEt regrouper le solde bancaire de tous les mois enregistrés sur « ${OWNER_LABEL[targetOwner]} ».`;
-  if (!toChange.length && !moveBanks) { alert(msg); return; }
-  if (!confirm(msg)) return;
-
-  bulkOwnerApply.disabled = true;
-  bulkOwnerApply.textContent = "Migration…";
-  try {
-    if (toChange.length) {
-      toChange.forEach((it) => { it.owner = targetOwner; });
-      await persistCatalog(catalog);
-    }
-    if (moveBanks) {
-      const all = await fetchAllMonthsAsc();
-      for (const { id, data } of all) {
-        if (data.bankBalances == null && data.bankBalance == null) continue;
-        const total = sumBankBalances(data);
-        const next = { ...data, bankBalances: { [targetOwner]: total } };
-        delete next.bankBalance;
-        await persistMonth(id, { ...next, updatedAt: new Date().toISOString(), updatedBy: currentUser.email });
-      }
-    }
-    await renderForecast();
-    alert("Terminé.");
-  } catch (e) {
-    console.error(e);
-    alert("Échec de la migration : " + e.message);
-  } finally {
-    bulkOwnerApply.disabled = false;
-    bulkOwnerApply.textContent = "Appliquer";
-  }
 }
 
 // ---- Firestore : mois ----
@@ -881,10 +821,7 @@ function gridRow(item, ids, monthsByI, opts) {
   let row = `<tr><td class="poste-cell">`;
   if (opts.structural) {
     row += `<input type="text" class="rename-input" value="${escapeAttr(item.label)}" data-item-id="${item.id}" />
-      <select class="owner-select" data-item-id="${item.id}" title="Espace du poste">
-        ${OWNER_KEYS.map((k) => `<option value="${k}"${k === item.owner ? " selected" : ""}>${OWNER_LABEL[k]}</option>`).join("")}
-      </select>
-      <label class="internal-check" title="Flux interne au foyer (virement entre espaces) : neutralisé dans le consolidé">
+      <label class="internal-check" title="Flux interne au foyer (remboursement entre Habib et Marwa) : neutralisé dans le consolidé">
         <input type="checkbox" class="internal-toggle" data-item-id="${item.id}"${item.internal ? " checked" : ""} /> interne
       </label>
       <button type="button" class="remove-item-btn" data-item-id="${item.id}" title="Supprimer ce poste">✕</button>`;
@@ -946,11 +883,7 @@ async function renderForecast() {
   ids.forEach((id, i) => { monthsByI[id] = docs[i] || { values: {} }; });
 
   const activeItems = forecastListedItems();
-  bulkOwner.hidden = !forecastEdit;
   forecastTable.classList.toggle("compact", !forecastEdit);
-  bulkOwnerCount.textContent = currentScope === "famille"
-    ? `les ${activeItems.length} postes`
-    : `les ${activeItems.length} postes de « ${OWNER_LABEL[currentScope]} »`;
   buildMonthGrid(forecastTable, ids, monthsByI, activeItems, { editable: true, structural: forecastEdit });
 
   forecastTable.querySelectorAll(".forecast-input").forEach((input) => {
@@ -962,9 +895,6 @@ async function renderForecast() {
   });
   forecastTable.querySelectorAll(".rename-input").forEach((input) => {
     input.addEventListener("change", () => renameItem(input.dataset.itemId, input.value));
-  });
-  forecastTable.querySelectorAll(".owner-select").forEach((sel) => {
-    sel.addEventListener("change", () => setItemOwner(sel.dataset.itemId, sel.value));
   });
   forecastTable.querySelectorAll(".internal-toggle").forEach((cb) => {
     cb.addEventListener("change", () => setItemInternal(cb.dataset.itemId, cb.checked));

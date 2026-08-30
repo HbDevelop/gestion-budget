@@ -4,7 +4,7 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>Gestion Budget</title>
-  <link rel="stylesheet" href="style.css?v=10" />
+  <link rel="stylesheet" href="style.css?v=11" />
   <script src="https://accounts.google.com/gsi/client" async defer></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 </head>
@@ -126,15 +126,9 @@
     <div id="view-previsions" class="view hidden">
       <main class="content wide">
         <h2 class="view-title">Prévisions sur 12 mois</h2>
-        <p class="view-subtitle">Modifie un montant directement dans la grille — le mois est créé si besoin. « Modifier les postes » pour renommer, réaffecter, ajouter ou supprimer.</p>
+        <p class="view-subtitle">Modifie un montant directement dans la grille — le mois est créé si besoin. « Modifier les postes » pour renommer, ajouter ou supprimer.</p>
         <div class="prev-toolbar">
           <button id="forecast-edit-toggle" class="btn small" type="button">✏️ Modifier les postes</button>
-        </div>
-        <div class="bulk-owner" id="bulk-owner" hidden>
-          <span>Attribuer <b id="bulk-owner-count">les postes affichés</b> à</span>
-          <select id="bulk-owner-select"></select>
-          <label><input type="checkbox" id="bulk-owner-banks" /> déplacer aussi les soldes bancaires de tous les mois</label>
-          <button id="bulk-owner-apply" class="btn small">Appliquer</button>
         </div>
         <div class="table-scroll">
           <table id="forecast-table" class="forecast-table"></table>
@@ -201,6 +195,6 @@
     </div>
   </div>
 
-  <script type="module" src="app.js?v=20"></script>
+  <script type="module" src="app.js?v=21"></script>
 </body>
 </html>
