@@ -1,7 +1,7 @@
 // Config du projet Firebase "gestion-budget" (console.firebase.google.com).
 // Ces clés sont publiques par design (elles identifient juste le projet, elles n'autorisent rien
-// en elles-mêmes) : la vraie sécurité vient des règles Firestore (voir README.md) qui limitent
-// la lecture/écriture aux deux comptes Google autorisés ci-dessous.
+// en elles-mêmes) : la vraie sécurité vient des règles Firestore (console Firebase du projet
+// gestion-budget-3a2f5) qui limitent la lecture/écriture aux comptes de AUTHORIZED_EMAILS.
 export const firebaseConfig = {
   apiKey: "AIzaSyCcZ_Q8YHCWR7vYH6wcOrLgDR4pc7rFsAU",
   authDomain: "gestion-budget-3a2f5.firebaseapp.com",
