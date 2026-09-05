@@ -21,6 +21,15 @@ const GROUPS = [
 ];
 const SECTIONS = [{ key: "income", label: "Revenus" }, ...GROUPS];
 
+// Postes de "réserve" : mouvements entre le compte courant et l'épargne / l'investissement,
+// pas des flux avec l'extérieur. On les distingue visuellement, et "Virement de l'épargne"
+// (role epargne_out) ne compte pas dans le total "Revenus" (ça pioche dans la réserve).
+const RESERVE_TAG = { epargne: "épargne", epargne_out: "reprise épargne", investissement: "invest." };
+function isReserve(item) { return !!(item && RESERVE_TAG[item.role]); }
+function reserveTagHtml(item) {
+  return isReserve(item) ? ` <span class="poste-tag">${RESERVE_TAG[item.role]}</span>` : "";
+}
+
 // ---- Espaces budgétaires (voir firebase-config.js) ----
 // Un espace par personne. Chaque poste porte un `owner` ∈ OWNER_KEYS.
 // La vue "Famille" (scope "famille") consolide les espaces.
@@ -177,7 +186,7 @@ function ownerKindSum(data, scope, kind) {
   return catalog.items.reduce((s, it) => {
     if (it.owner !== scope) return s;
     const isIncome = it.type === "income";
-    if (kind === "income" && !isIncome) return s;
+    if (kind === "income" && (!isIncome || it.role === "epargne_out")) return s;
     if (kind === "expense" && isIncome) return s;
     return s + ((values[it.id] && values[it.id].amount) || 0);
   }, 0);
@@ -186,6 +195,7 @@ function ownerKindSum(data, scope, kind) {
 function computeTotals(cat, data, scope = "famille") {
   const values = (data && data.values) || {};
   let totalIncome = 0;
+  let epargneIn = 0;          // "Virement de l'épargne" : reprise sur la réserve, pas un vrai revenu
   let revenusAVenir = 0;      // revenus du mois pas encore cochés "reçu"
   const byGroup = { regulieres: 0, occasionnelles: 0, capital: 0 };
   let chargesAVenir = 0;      // dépenses du mois pas encore cochées "payé"
@@ -195,6 +205,7 @@ function computeTotals(cat, data, scope = "famille") {
     const amount = (v && v.amount) || 0;
     if (item.type === "income") {
       totalIncome += amount;
+      if (item.role === "epargne_out") epargneIn += amount;
       revenusAVenir += Math.max(0, amount - receivedOf(v));
     } else {
       byGroup[item.type] = (byGroup[item.type] || 0) + amount;
@@ -202,14 +213,17 @@ function computeTotals(cat, data, scope = "famille") {
     }
   });
   const totalExpenses = byGroup.regulieres + byGroup.occasionnelles + byGroup.capital;
-  const balance = totalIncome - totalExpenses;
+  const revenusReels = totalIncome - epargneIn;   // revenus hors reprise sur l'épargne
+  // Solde / reste à vivre : on part des revenus RÉELS. Si une "Virement de l'épargne"
+  // comble le mois, le solde doit montrer le trou comblé par la réserve, pas le masquer.
+  const balance = revenusReels - totalExpenses;
   const bankBalance = bankFor(data, scope);
   // Reste à vivre réel : ce qui est sur le compte MAINTENANT, moins ce qu'il reste à payer.
   const resteAVivreReel = bankBalance - chargesAVenir;
   // Solde projeté fin de mois : + les revenus encore à encaisser. Chiffre stable qui ne
   // saute pas selon la date à laquelle le salaire (ou les versements de l'Etude) tombent.
   const soldeProjete = bankBalance + revenusAVenir - chargesAVenir;
-  return { totalIncome, revenusAVenir, byGroup, totalExpenses, balance, chargesAVenir, resteAVivreReel, soldeProjete, bankBalance };
+  return { totalIncome, revenusReels, epargneIn, revenusAVenir, byGroup, totalExpenses, balance, chargesAVenir, resteAVivreReel, soldeProjete, bankBalance };
 }
 
 // ---- State ----
@@ -242,6 +256,7 @@ const saveStatus = $("#save-status");
 const groupsContainer = $("#groups-container");
 const incomeList = $("#income-list");
 const totalIncomeEl = $("#total-income");
+const incomeNoteEl = $("#income-note");
 const totalExpensesEl = $("#total-expenses");
 const balanceEl = $("#balance");
 const daysLeftEl = $("#days-left");
@@ -538,10 +553,10 @@ function buildIncomeRow(item) {
   const full0 = v0.amount > 0 && rec0 >= v0.amount;
 
   const block = el("div", "income-block");
-  const row = el("div", "row income-row");
+  const row = el("div", "row income-row" + (isReserve(item) ? " poste-reserve" : ""));
   row.innerHTML =
     `<input type="checkbox" class="paid-check" ${full0 ? "checked" : ""} title="Tout reçu" />` +
-    `<span class="label-text">${escapeHtml(item.label)}</span>` +
+    `<span class="label-text">${escapeHtml(item.label)}${reserveTagHtml(item)}</span>` +
     `<input type="number" class="amount-input" value="${v0.amount}" step="0.01" />`;
 
   const recu = el("div", "income-recu" + (full0 ? " done" : ""));
@@ -614,10 +629,10 @@ function buildSuiviRow(item) {
   const current = () => monthData.values[item.id] || { amount: 0, paid: false };
   const v0 = current();
   const div = document.createElement("div");
-  div.className = "row";
+  div.className = "row" + (isReserve(item) ? " poste-reserve" : "");
   div.innerHTML = `
     <input type="checkbox" class="paid-check" ${v0.paid ? "checked" : ""} title="Payé" />
-    <span class="label-text">${escapeHtml(item.label)}</span>
+    <span class="label-text">${escapeHtml(item.label)}${reserveTagHtml(item)}</span>
     <input type="number" class="amount-input" value="${v0.amount}" step="0.01" />
   `;
   const amountInput = div.querySelector(".amount-input");
@@ -643,7 +658,7 @@ function buildSuiviRow(item) {
 function buildFamilleRow(item) {
   const v = (monthData.values && monthData.values[item.id]) || { amount: 0, paid: false };
   const isExpense = item.type !== "income";
-  const div = el("div", "row fam-row");
+  const div = el("div", "row fam-row" + (isReserve(item) ? " poste-reserve" : ""));
   let done, dotTitle, amountHtml;
   if (isExpense) {
     done = !!v.paid;
@@ -659,7 +674,7 @@ function buildFamilleRow(item) {
   }
   div.innerHTML =
     `<span class="paid-dot${done ? " on" : ""}" title="${dotTitle}"></span>` +
-    `<span class="label-text">${escapeHtml(item.label)}</span>` +
+    `<span class="label-text">${escapeHtml(item.label)}${reserveTagHtml(item)}</span>` +
     `<span class="fam-amount">${amountHtml}</span>`;
   return div;
 }
@@ -683,7 +698,11 @@ function renderTotals() {
     return;
   }
   const t = computeTotals(catalog, monthData, currentScope);
-  totalIncomeEl.textContent = euros(t.totalIncome);
+  totalIncomeEl.textContent = euros(t.revenusReels);
+  if (incomeNoteEl) {
+    incomeNoteEl.textContent = t.epargneIn > 0 ? "+ " + euros(t.epargneIn) + " repris de l'épargne" : "";
+    incomeNoteEl.classList.toggle("hidden", !(t.epargneIn > 0));
+  }
   totalExpensesEl.textContent = euros(t.totalExpenses);
   balanceEl.textContent = euros(t.balance);
   balanceEl.classList.toggle("negative", t.balance < 0);
@@ -714,7 +733,7 @@ function renderFamilleSuivi() {
 
   // 1. Cartes résumé, avec ventilation par personne (flux avec l'extérieur du foyer)
   const summary = el("section", "summary summary-fam");
-  summary.appendChild(famSummaryCard("Revenus du foyer", fam.totalIncome, "income"));
+  summary.appendChild(famSummaryCard("Revenus du foyer", fam.revenusReels, "income", fam.epargneIn));
   summary.appendChild(famSummaryCard("Dépenses du foyer", fam.totalExpenses, "expense"));
   const soldeCard = famSummaryCard("Solde consolidé", fam.balance, null);
   soldeCard.querySelector(".summary-value").classList.toggle("negative", fam.balance < 0);
@@ -728,10 +747,11 @@ function renderFamilleSuivi() {
   OWNER_KEYS.forEach((owner) => suiviFamille.appendChild(famPersonBlock(owner)));
 }
 
-function famSummaryCard(label, value, kind) {
+function famSummaryCard(label, value, kind, note) {
   const card = el("div", "summary-card");
   card.appendChild(el("span", "summary-label", label));
   card.appendChild(el("span", "summary-value", euros(value)));
+  if (note > 0) card.appendChild(el("span", "summary-note", "+ " + euros(note) + " repris de l'épargne"));
   if (kind) {
     const split = el("div", "summary-split");
     OWNER_KEYS.forEach((k) => {
@@ -847,7 +867,7 @@ function famPersonBlock(owner) {
     bodyEl.appendChild(el("p", "pb-empty", "Aucun montant ce mois."));
   } else {
     const sub = el("div", "pb-sub",
-      `<span>Revenus <b>${euros(t.totalIncome)}</b></span>` +
+      `<span>Revenus <b>${euros(t.revenusReels)}</b></span>` +
       `<span>Dépenses <b>${euros(t.totalExpenses)}</b></span>` +
       `<span>Solde <b class="${t.balance < 0 ? "negative" : ""}">${euros(t.balance)}</b></span>`);
     bodyEl.appendChild(sub);
@@ -884,7 +904,7 @@ function buildMonthGrid(table, ids, monthsByI, items, opts) {
     if (opts.structural) {
       html += `<tr class="add-row"><td colspan="${ids.length + 1}"><button type="button" class="add-item-btn" data-type="${sec.key}">+ Ajouter un poste</button></td></tr>`;
     }
-    const getValue = sec.key === "income" ? (t) => t.totalIncome : (t) => t.byGroup[sec.key];
+    const getValue = sec.key === "income" ? (t) => t.revenusReels : (t) => t.byGroup[sec.key];
     html += gridTotalRow(sec.key === "income" ? "Sous-total revenus" : `Sous-total ${sec.label.toLowerCase()}`, ids, monthsByI, getValue, false, "st-" + sec.key);
   });
 
@@ -900,7 +920,7 @@ function gridRow(item, ids, monthsByI, opts) {
     row += `<input type="text" class="rename-input" value="${escapeAttr(item.label)}" data-item-id="${item.id}" />
       <button type="button" class="remove-item-btn" data-item-id="${item.id}" title="Supprimer ce poste">✕</button>`;
   } else {
-    row += `<span class="cell-label poste-label" title="${escapeAttr(item.label)}">${escapeHtml(item.label)}</span>`;
+    row += `<span class="cell-label poste-label${isReserve(item) ? " poste-reserve" : ""}" title="${escapeAttr(item.label)}">${escapeHtml(item.label)}${reserveTagHtml(item)}</span>`;
   }
   row += `</td>`;
   ids.forEach((id) => {
@@ -931,7 +951,7 @@ function gridTotalRow(label, ids, monthsByI, getValue, strong, key) {
 function refreshForecastTotals(mid, monthsByI) {
   const t = computeTotals(catalog, monthsByI[mid], currentScope);
   const vals = {
-    "st-income": t.totalIncome,
+    "st-income": t.revenusReels,
     "st-regulieres": t.byGroup.regulieres,
     "st-occasionnelles": t.byGroup.occasionnelles,
     "st-capital": t.byGroup.capital,
