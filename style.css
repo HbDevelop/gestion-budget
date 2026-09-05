@@ -190,7 +190,7 @@ body {
   gap: 14px;
 }
 @media (min-width: 640px) {
-  .live-grid { grid-template-columns: repeat(4, 1fr); }
+  .live-grid { grid-template-columns: repeat(3, 1fr); }
 }
 .live-field { display: flex; flex-direction: column; gap: 6px; }
 .live-label { font-size: 12px; color: var(--text-muted); }
