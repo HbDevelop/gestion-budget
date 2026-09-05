@@ -151,6 +151,14 @@ function bankBalancesOf(data) {
   if (typeof data.bankBalance === "number") return { [FALLBACK_OWNER]: data.bankBalance };
   return {};
 }
+
+// Montant d'un revenu déjà encaissé. Nouveau champ `received` (partiel) ; à défaut,
+// on retombe sur l'ancien booléen `paid` (tout ou rien).
+function receivedOf(v) {
+  if (!v) return 0;
+  if (typeof v.received === "number") return v.received;
+  return v.paid ? (v.amount || 0) : 0;
+}
 // Somme de tous les soldes bancaires du mois, quelle que soit la clé — y compris d'anciens
 // seaux orphelins (ex. "commun") pas encore réaffectés à une personne.
 function sumBankBalances(data) {
@@ -187,7 +195,7 @@ function computeTotals(cat, data, scope = "famille") {
     const amount = (v && v.amount) || 0;
     if (item.type === "income") {
       totalIncome += amount;
-      if (!v || !v.paid) revenusAVenir += amount;
+      revenusAVenir += Math.max(0, amount - receivedOf(v));
     } else {
       byGroup[item.type] = (byGroup[item.type] || 0) + amount;
       if (!v || !v.paid) chargesAVenir += amount;
@@ -518,7 +526,72 @@ function renderIncome() {
   incomeList.innerHTML = "";
   const items = catalog.items.filter((it) => it.type === "income" && inScope(it, currentScope) && isActiveAt(it, currentMonthId) && hasAmount(it));
   $("#income-card").classList.toggle("hidden", !items.length);
-  items.forEach((item) => incomeList.appendChild(buildSuiviRow(item)));
+  items.forEach((item) => incomeList.appendChild(buildIncomeRow(item)));
+}
+
+// Ligne de revenu : montant attendu + sous-ligne "encaissé X sur Y" avec barre de
+// progression. La case coche/décoche = tout reçu / rien reçu ; le champ "encaissé"
+// permet le partiel (ex. l'Etude payée en plusieurs fois dans le mois).
+function buildIncomeRow(item) {
+  const current = () => monthData.values[item.id] || { amount: 0, paid: false };
+  const pct = (amt, rec) => (amt > 0 ? Math.max(0, Math.min(100, (rec / amt) * 100)) : 0);
+  const v0 = current();
+  const rec0 = receivedOf(v0);
+  const full0 = v0.amount > 0 && rec0 >= v0.amount;
+
+  const block = el("div", "income-block");
+  const row = el("div", "row income-row");
+  row.innerHTML =
+    `<input type="checkbox" class="paid-check" ${full0 ? "checked" : ""} title="Tout reçu" />` +
+    `<span class="label-text">${escapeHtml(item.label)}</span>` +
+    `<input type="number" class="amount-input" value="${v0.amount}" step="0.01" />`;
+
+  const recu = el("div", "income-recu" + (full0 ? " done" : ""));
+  recu.innerHTML =
+    `<span class="recu-lbl">encaissé</span>` +
+    `<input type="number" class="recu-input" value="${rec0}" step="0.01" aria-label="Montant déjà encaissé" />` +
+    `<span class="recu-of">sur <b>${euros(v0.amount)}</b></span>` +
+    `<span class="recu-bar"><i style="width:${pct(v0.amount, rec0)}%"></i></span>`;
+  block.append(row, recu);
+
+  const amountInput = row.querySelector(".amount-input");
+  const paidCheck = row.querySelector(".paid-check");
+  const recuInput = recu.querySelector(".recu-input");
+  const recuOfEl = recu.querySelector(".recu-of b");
+  const bar = recu.querySelector(".recu-bar i");
+
+  // Applique la valeur, resynchronise l'affichage (barre, "sur X", case, total), sauvegarde.
+  const commit = (next) => {
+    monthData.values[item.id] = next;
+    const amt = next.amount || 0;
+    const rec = receivedOf(next);
+    const full = amt > 0 && rec >= amt;
+    recuOfEl.textContent = euros(amt);
+    bar.style.width = pct(amt, rec) + "%";
+    recu.classList.toggle("done", full);
+    paidCheck.checked = full;
+    if (document.activeElement !== recuInput) recuInput.value = rec;
+    renderTotals();
+    scheduleSave();
+  };
+
+  amountInput.addEventListener("input", () => {
+    const c = current();
+    const amt = parseFloat(amountInput.value) || 0;
+    commit({ ...c, amount: amt, paid: amt > 0 && receivedOf(c) >= amt });
+  });
+  recuInput.addEventListener("input", () => {
+    const c = current();
+    const rec = parseFloat(recuInput.value) || 0;
+    commit({ ...c, received: rec, paid: (c.amount || 0) > 0 && rec >= (c.amount || 0) });
+  });
+  paidCheck.addEventListener("change", () => {
+    const c = current();
+    const amt = c.amount || 0;
+    commit({ ...c, received: paidCheck.checked ? amt : 0, paid: paidCheck.checked });
+  });
+
+  return block;
 }
 
 function renderExpenseGroups() {
@@ -538,14 +611,14 @@ function renderExpenseGroups() {
   });
 }
 
+// Ligne de dépense (les revenus passent par buildIncomeRow).
 function buildSuiviRow(item) {
-  const isExpense = item.type !== "income";
   const current = () => monthData.values[item.id] || { amount: 0, paid: false };
   const v0 = current();
   const div = document.createElement("div");
   div.className = "row";
   div.innerHTML = `
-    <input type="checkbox" class="paid-check" ${v0.paid ? "checked" : ""} title="${isExpense ? "Payé" : "Reçu (déjà sur le compte)"}" />
+    <input type="checkbox" class="paid-check" ${v0.paid ? "checked" : ""} title="Payé" />
     <span class="label-text">${escapeHtml(item.label)}</span>
     <input type="number" class="amount-input" value="${v0.amount}" step="0.01" />
   `;
@@ -558,14 +631,12 @@ function buildSuiviRow(item) {
     renderTotals();
     scheduleSave();
   });
-  if (paidCheck) {
-    paidCheck.addEventListener("change", () => {
-      const c = current();
-      monthData.values[item.id] = { amount: c.amount, paid: paidCheck.checked };
-      renderTotals();
-      scheduleSave();
-    });
-  }
+  paidCheck.addEventListener("change", () => {
+    const c = current();
+    monthData.values[item.id] = { amount: c.amount, paid: paidCheck.checked };
+    renderTotals();
+    scheduleSave();
+  });
   return div;
 }
 
@@ -575,13 +646,23 @@ function buildFamilleRow(item) {
   const v = (monthData.values && monthData.values[item.id]) || { amount: 0, paid: false };
   const isExpense = item.type !== "income";
   const div = el("div", "row fam-row");
-  const dotTitle = isExpense
-    ? (v.paid ? "Payé" : "Non payé")
-    : (v.paid ? "Reçu" : "Pas encore reçu");
+  let done, dotTitle, amountHtml;
+  if (isExpense) {
+    done = !!v.paid;
+    dotTitle = done ? "Payé" : "Non payé";
+    amountHtml = euros(v.amount);
+  } else {
+    const rec = receivedOf(v);
+    done = v.amount > 0 && rec >= v.amount;
+    dotTitle = done ? "Reçu" : rec > 0 ? "Partiellement reçu" : "Pas encore reçu";
+    amountHtml = !done && rec > 0
+      ? `<span class="fam-recu">${euros(rec)} /</span> ${euros(v.amount)}`
+      : euros(v.amount);
+  }
   div.innerHTML =
-    `<span class="paid-dot${v.paid ? " on" : ""}" title="${dotTitle}"></span>` +
+    `<span class="paid-dot${done ? " on" : ""}" title="${dotTitle}"></span>` +
     `<span class="label-text">${escapeHtml(item.label)}</span>` +
-    `<span class="fam-amount">${euros(v.amount)}</span>`;
+    `<span class="fam-amount">${amountHtml}</span>`;
   return div;
 }
 

@@ -183,6 +183,46 @@ body {
 .paid-check-spacer { width: 18px; display: inline-block; }
 .label-text { font-size: 14px; }
 
+/* Revenu = ligne principale + sous-ligne "encaissé X sur Y" avec barre de progression */
+.income-block { display: flex; flex-direction: column; gap: 4px; }
+.income-recu {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 26px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.recu-lbl { flex: none; }
+.income-recu .recu-input {
+  flex: none;
+  width: 74px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 6px;
+  font-size: 12px;
+}
+.recu-of { flex: none; white-space: nowrap; }
+.recu-of b { color: var(--text); font-weight: 600; }
+.recu-bar {
+  flex: 1;
+  min-width: 36px;
+  max-width: 140px;
+  height: 5px;
+  border-radius: 3px;
+  background: var(--border);
+  overflow: hidden;
+}
+.recu-bar i { display: block; height: 100%; background: var(--primary); }
+.income-recu.done { color: var(--success); }
+.income-recu.done .recu-bar i { background: var(--success); }
+/* Vue Famille : montant déjà encaissé devant le total pour un revenu partiel */
+.fam-recu { color: var(--text-muted); font-weight: 400; }
+@media (max-width: 640px) {
+  .income-recu { flex-wrap: wrap; margin-left: 22px; }
+  .recu-bar { max-width: none; min-width: 60px; }
+}
+
 .live-panel { background: #eff6ff; }
 .live-grid {
   display: grid;
