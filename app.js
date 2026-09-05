@@ -1,4 +1,4 @@
-import { firebaseConfig, AUTHORIZED_EMAILS, GOOGLE_CLIENT_ID, SPACES } from "./firebase-config.js";
+import { firebaseConfig, GOOGLE_CLIENT_ID, SPACES } from "./firebase-config.js";
 import { initializeApp } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-app.js";
 import {
   getAuth, GoogleAuthProvider, signInWithCredential, signOut, onAuthStateChanged
@@ -344,26 +344,24 @@ onAuthStateChanged(auth, async (user) => {
     loginScreen.classList.remove("hidden");
     return;
   }
-  if (!AUTHORIZED_EMAILS.includes(user.email)) {
+  userLabel.textContent = user.email;
+
+  // Pas de liste d'emails dans le code : l'autorisation est faite par les règles Firestore.
+  // Si le compte n'est pas autorisé, la 1re lecture lève "permission-denied" → écran refusé.
+  try {
+    catalog = await fetchCatalog();
+    if (!catalog) {
+      catalog = DEFAULT_CATALOG();
+      await persistCatalog(catalog);
+    }
+    await normalizeCatalogOwners();
+  } catch (e) {
+    console.warn("Accès refusé par Firestore :", (e && e.code) || e);
     deniedScreen.classList.remove("hidden");
-    $("#denied-email").textContent = user.email;
     return;
   }
-  userLabel.textContent = user.email;
-  appShell.classList.remove("hidden");
-  catalog = await fetchCatalog();
-  if (!catalog) {
-    catalog = DEFAULT_CATALOG();
-    await persistCatalog(catalog);
-  }
-  await normalizeCatalogOwners();
 
-  // Au tout premier chargement (aucun choix mémorisé), on ouvre sur l'espace perso de la
-  // personne connectée plutôt que sur le consolidé.
-  if (!lsGet("budget-scope")) {
-    const mine = SPACES.find((s) => s.email === user.email);
-    currentScope = mine ? mine.key : DEFAULT_SCOPE;
-  }
+  appShell.classList.remove("hidden");
   buildScopeSwitch();
   await loadMonth(currentMonthId);
 });
