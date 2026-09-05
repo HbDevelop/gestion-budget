@@ -178,14 +178,16 @@ function ownerKindSum(data, scope, kind) {
 function computeTotals(cat, data, scope = "famille") {
   const values = (data && data.values) || {};
   let totalIncome = 0;
+  let revenusAVenir = 0;      // revenus du mois pas encore cochés "reçu"
   const byGroup = { regulieres: 0, occasionnelles: 0, capital: 0 };
-  let chargesAVenir = 0;
+  let chargesAVenir = 0;      // dépenses du mois pas encore cochées "payé"
   cat.items.forEach((item) => {
     if (!inScope(item, scope)) return;
     const v = values[item.id];
     const amount = (v && v.amount) || 0;
     if (item.type === "income") {
       totalIncome += amount;
+      if (!v || !v.paid) revenusAVenir += amount;
     } else {
       byGroup[item.type] = (byGroup[item.type] || 0) + amount;
       if (!v || !v.paid) chargesAVenir += amount;
@@ -194,8 +196,12 @@ function computeTotals(cat, data, scope = "famille") {
   const totalExpenses = byGroup.regulieres + byGroup.occasionnelles + byGroup.capital;
   const balance = totalIncome - totalExpenses;
   const bankBalance = bankFor(data, scope);
+  // Reste à vivre réel : ce qui est sur le compte MAINTENANT, moins ce qu'il reste à payer.
   const resteAVivreReel = bankBalance - chargesAVenir;
-  return { totalIncome, byGroup, totalExpenses, balance, chargesAVenir, resteAVivreReel, bankBalance };
+  // Solde projeté fin de mois : + les revenus encore à encaisser. Chiffre stable qui ne
+  // saute pas selon la date à laquelle le salaire (ou les versements de l'Etude) tombent.
+  const soldeProjete = bankBalance + revenusAVenir - chargesAVenir;
+  return { totalIncome, revenusAVenir, byGroup, totalExpenses, balance, chargesAVenir, resteAVivreReel, soldeProjete, bankBalance };
 }
 
 // ---- State ----
@@ -232,8 +238,10 @@ const totalExpensesEl = $("#total-expenses");
 const balanceEl = $("#balance");
 const daysLeftEl = $("#days-left");
 const bankBalanceEl = $("#bank-balance");
+const revenusAVenirEl = $("#revenus-a-venir");
 const chargesAVenirEl = $("#charges-a-venir");
 const resteAVivreEl = $("#reste-a-vivre");
+const soldeProjeteEl = $("#solde-projete");
 const dailyAllocationEl = $("#daily-allocation");
 const emptyMonthBanner = $("#empty-month-banner");
 const createMonthBtn = $("#create-month-btn");
@@ -537,7 +545,7 @@ function buildSuiviRow(item) {
   const div = document.createElement("div");
   div.className = "row";
   div.innerHTML = `
-    ${isExpense ? `<input type="checkbox" class="paid-check" ${v0.paid ? "checked" : ""} title="Payé" />` : `<span class="paid-check-spacer"></span>`}
+    <input type="checkbox" class="paid-check" ${v0.paid ? "checked" : ""} title="${isExpense ? "Payé" : "Reçu (déjà sur le compte)"}" />
     <span class="label-text">${escapeHtml(item.label)}</span>
     <input type="number" class="amount-input" value="${v0.amount}" step="0.01" />
   `;
@@ -567,10 +575,11 @@ function buildFamilleRow(item) {
   const v = (monthData.values && monthData.values[item.id]) || { amount: 0, paid: false };
   const isExpense = item.type !== "income";
   const div = el("div", "row fam-row");
+  const dotTitle = isExpense
+    ? (v.paid ? "Payé" : "Non payé")
+    : (v.paid ? "Reçu" : "Pas encore reçu");
   div.innerHTML =
-    (isExpense
-      ? `<span class="paid-dot${v.paid ? " on" : ""}" title="${v.paid ? "Payé" : "Non payé"}"></span>`
-      : `<span class="paid-check-spacer"></span>`) +
+    `<span class="paid-dot${v.paid ? " on" : ""}" title="${dotTitle}"></span>` +
     `<span class="label-text">${escapeHtml(item.label)}</span>` +
     `<span class="fam-amount">${euros(v.amount)}</span>`;
   return div;
@@ -590,7 +599,8 @@ function renderTotals() {
   daysLeftEl.textContent = days;
 
   if (!monthData || !catalog) {
-    [totalIncomeEl, totalExpensesEl, balanceEl, chargesAVenirEl, resteAVivreEl, dailyAllocationEl].forEach((elm) => elm.textContent = euros(0));
+    [totalIncomeEl, totalExpensesEl, balanceEl, revenusAVenirEl, chargesAVenirEl, resteAVivreEl, soldeProjeteEl, dailyAllocationEl]
+      .forEach((elm) => { if (elm) elm.textContent = euros(0); });
     return;
   }
   const t = computeTotals(catalog, monthData, currentScope);
@@ -598,11 +608,15 @@ function renderTotals() {
   totalExpensesEl.textContent = euros(t.totalExpenses);
   balanceEl.textContent = euros(t.balance);
   balanceEl.classList.toggle("negative", t.balance < 0);
+  revenusAVenirEl.textContent = euros(t.revenusAVenir);
   chargesAVenirEl.textContent = euros(t.chargesAVenir);
   resteAVivreEl.textContent = euros(t.resteAVivreReel);
   resteAVivreEl.classList.toggle("negative", t.resteAVivreReel < 0);
+  soldeProjeteEl.textContent = euros(t.soldeProjete);
+  soldeProjeteEl.classList.toggle("negative", t.soldeProjete < 0);
 
-  const allocation = days > 0 ? t.resteAVivreReel / days : t.resteAVivreReel;
+  // Allocation journalière = solde projeté (revenus à venir inclus) / jours restants.
+  const allocation = days > 0 ? t.soldeProjete / days : t.soldeProjete;
   dailyAllocationEl.textContent = euros(allocation);
   dailyAllocationEl.classList.toggle("negative", allocation < 0);
 }
@@ -660,8 +674,10 @@ function famRealtimePanel(days) {
   const totals = {};
   OWNER_KEYS.forEach((k) => { totals[k] = computeTotals(catalog, monthData, k); });
   const famBank = sumBankBalances(monthData);
+  const famRevenus = OWNER_KEYS.reduce((s, k) => s + totals[k].revenusAVenir, 0);
   const famUpcoming = OWNER_KEYS.reduce((s, k) => s + totals[k].chargesAVenir, 0);
   const famReste = OWNER_KEYS.reduce((s, k) => s + totals[k].resteAVivreReel, 0);
+  const famProjete = OWNER_KEYS.reduce((s, k) => s + totals[k].soldeProjete, 0);
 
   const table = el("table", "fam-rt-table");
   const head = el("thead");
@@ -700,9 +716,11 @@ function famRealtimePanel(days) {
   balRow.appendChild(el("td", "fam-col", euros(famBank)));
   body.appendChild(balRow);
 
+  body.appendChild(famRtRow("Revenus à venir", OWNER_KEYS.map((k) => totals[k].revenusAVenir), famRevenus));
   body.appendChild(famRtRow("Charges à venir", OWNER_KEYS.map((k) => totals[k].chargesAVenir), famUpcoming));
-  body.appendChild(famRtRow("Reste à vivre", OWNER_KEYS.map((k) => totals[k].resteAVivreReel), famReste, true));
-  body.appendChild(famRtRow("Allocation / jour", OWNER_KEYS.map((k) => totals[k].resteAVivreReel / days), famReste / days, true));
+  body.appendChild(famRtRow("Reste à vivre réel", OWNER_KEYS.map((k) => totals[k].resteAVivreReel), famReste, true));
+  body.appendChild(famRtRow("Solde projeté", OWNER_KEYS.map((k) => totals[k].soldeProjete), famProjete, true));
+  body.appendChild(famRtRow("Allocation / jour", OWNER_KEYS.map((k) => totals[k].soldeProjete / days), famProjete / days, true));
 
   table.appendChild(body);
   card.appendChild(table);
