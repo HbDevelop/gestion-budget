@@ -788,11 +788,11 @@ function buildMonthGrid(table, ids, monthsByI, items, opts) {
       html += `<tr class="add-row"><td colspan="${ids.length + 1}"><button type="button" class="add-item-btn" data-type="${sec.key}">+ Ajouter un poste</button></td></tr>`;
     }
     const getValue = sec.key === "income" ? (t) => t.totalIncome : (t) => t.byGroup[sec.key];
-    html += gridTotalRow(sec.key === "income" ? "Sous-total revenus" : `Sous-total ${sec.label.toLowerCase()}`, ids, monthsByI, getValue);
+    html += gridTotalRow(sec.key === "income" ? "Sous-total revenus" : `Sous-total ${sec.label.toLowerCase()}`, ids, monthsByI, getValue, false, "st-" + sec.key);
   });
 
-  html += gridTotalRow("Total dépenses", ids, monthsByI, (t) => t.totalExpenses, true);
-  html += gridTotalRow("Reste à vivre", ids, monthsByI, (t) => t.balance, true);
+  html += gridTotalRow("Total dépenses", ids, monthsByI, (t) => t.totalExpenses, true, "total-expenses");
+  html += gridTotalRow("Reste à vivre", ids, monthsByI, (t) => t.balance, true, "balance");
   html += "</tbody>";
   table.innerHTML = html;
 }
@@ -820,13 +820,31 @@ function gridRow(item, ids, monthsByI, opts) {
   return row + "</tr>";
 }
 
-function gridTotalRow(label, ids, monthsByI, getValue, strong) {
-  let row = `<tr class="${strong ? "total-row" : "subtotal-row"}"><td><span class="cell-label">${label}</span></td>`;
+function gridTotalRow(label, ids, monthsByI, getValue, strong, key) {
+  let row = `<tr class="${strong ? "total-row" : "subtotal-row"}" data-total="${key}"><td><span class="cell-label">${label}</span></td>`;
   ids.forEach((id) => {
     const t = computeTotals(catalog, monthsByI[id], currentScope);
-    row += `<td>${euros(getValue(t))}</td>`;
+    row += `<td data-total-month="${id}">${euros(getValue(t))}</td>`;
   });
   return row + "</tr>";
+}
+
+// Met à jour les cellules de sous-totaux/totaux d'UNE colonne (un mois) sans reconstruire
+// toute la grille — pour ne pas "recharger" la page à chaque montant saisi.
+function refreshForecastTotals(mid, monthsByI) {
+  const t = computeTotals(catalog, monthsByI[mid], currentScope);
+  const vals = {
+    "st-income": t.totalIncome,
+    "st-regulieres": t.byGroup.regulieres,
+    "st-occasionnelles": t.byGroup.occasionnelles,
+    "st-capital": t.byGroup.capital,
+    "total-expenses": t.totalExpenses,
+    "balance": t.balance
+  };
+  Object.entries(vals).forEach(([key, v]) => {
+    const cell = forecastTable.querySelector(`tr[data-total="${key}"] td[data-total-month="${mid}"]`);
+    if (cell) cell.textContent = euros(v);
+  });
 }
 
 // ---- Historique (grille en lecture seule, tous les postes, mois passés) ----
@@ -883,7 +901,8 @@ async function renderForecast() {
 
 async function setForecastValue(targetMonthId, itemId, value, monthsByI) {
   let data = monthsByI[targetMonthId];
-  if (!data || !data.values || !Object.keys(data).length) {
+  const wasNew = !data || !data.values || !Object.keys(data).length;
+  if (wasNew) {
     const ids = forecastMonthIds();
     const idx = ids.indexOf(targetMonthId);
     let sourceData = null;
@@ -895,7 +914,11 @@ async function setForecastValue(targetMonthId, itemId, value, monthsByI) {
   const prev = data.values[itemId] || { amount: 0, paid: false };
   data.values[itemId] = { amount: value, paid: prev.paid };
   await persistMonth(targetMonthId, { ...data, updatedAt: new Date().toISOString(), updatedBy: currentUser.email });
-  await renderForecast();
+  // Mois vierge qu'on vient de matérialiser (valeurs héritées du mois précédent) : on
+  // ré-affiche une fois pour montrer ces valeurs. Sinon, on met juste à jour les totaux
+  // de la colonne éditée — pas de reconstruction, le focus reste dans la grille.
+  if (wasNew) await renderForecast();
+  else refreshForecastTotals(targetMonthId, monthsByI);
 }
 
 async function addItem(type) {
