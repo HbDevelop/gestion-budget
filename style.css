@@ -148,6 +148,7 @@ body {
 .summary-label { font-size: 12px; color: var(--text-muted); }
 .summary-value { font-size: 20px; font-weight: 600; }
 .summary-value.negative { color: var(--danger); }
+.summary-note { font-size: 11px; color: var(--text-muted); margin-top: 2px; }
 
 .card {
   background: var(--card-bg);
@@ -182,6 +183,23 @@ body {
 .row input[type="checkbox"] { width: 18px; height: 18px; }
 .paid-check-spacer { width: 18px; display: inline-block; }
 .label-text { font-size: 14px; }
+
+/* Poste de "réserve" (épargne / virement de l'épargne / investissement) : discret + étiquette */
+.poste-reserve .label-text,
+.poste-reserve.poste-label { color: var(--text-muted); }
+.poste-tag {
+  display: inline-block;
+  margin-left: 6px;
+  padding: 1px 6px;
+  border-radius: 999px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--text-muted);
+  vertical-align: middle;
+  white-space: nowrap;
+}
 
 /* Revenu = ligne principale + sous-ligne "encaissé X sur Y" avec barre de progression */
 .income-block { display: flex; flex-direction: column; gap: 4px; }
@@ -328,6 +346,8 @@ body {
 .forecast-table .cell-label {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  row-gap: 2px;
   min-height: 30px;
 }
 .poste-label {
