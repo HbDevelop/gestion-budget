@@ -1382,16 +1382,20 @@ async function renderAnalyse() {
   });
 
   // Classement des postes occasionnels par coût total cumulé sur les mois passés + en cours
-  // (les mois futurs ne sont que des prévisions, pas des dépenses réelles).
+  // (les mois futurs ne sont que des prévisions, pas des dépenses réelles). En vue Famille,
+  // Habib et Marwa ont chacun leur propre poste (id différent) même quand ils portent le même
+  // nom (ex. "Sport / Club") — on les fusionne par libellé pour avoir une seule ligne avec le
+  // total des deux, au lieu de deux lignes identiques qui n'affichent chacune que la moitié.
   const occItems = catalog.items.filter((it) => it.type === "occasionnelles" && inScope(it, currentScope));
   const occTotals = {};
-  occItems.forEach((it) => { occTotals[it.id] = 0; });
   months.filter(({ id }) => id <= currentMonthId).forEach(({ data: d }) => {
     const values_ = d.values || {};
-    occItems.forEach((it) => { occTotals[it.id] += (values_[it.id] && values_[it.id].amount) || 0; });
+    occItems.forEach((it) => {
+      occTotals[it.label] = (occTotals[it.label] || 0) + ((values_[it.id] && values_[it.id].amount) || 0);
+    });
   });
-  const occRanked = occItems
-    .map((it) => ({ label: it.label, total: occTotals[it.id] }))
+  const occRanked = Object.entries(occTotals)
+    .map(([label, total]) => ({ label, total }))
     .filter((r) => r.total > 0)
     .sort((a, b) => b.total - a.total);
   charts.occTop = new Chart($("#chart-occ-top"), {
