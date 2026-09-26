@@ -930,7 +930,7 @@ function buildMonthGrid(table, ids, monthsByI, items, opts) {
     html += gridTotalRow(sec.key === "income" ? "Sous-total revenus" : `Sous-total ${sec.label.toLowerCase()}`, ids, monthsByI, getValue, false, "st-" + sec.key);
   });
 
-  html += gridTotalRow("Total dépenses", ids, monthsByI, (t) => t.totalExpenses, true, "total-expenses");
+  html += gridTotalRow("Total dépenses", ids, monthsByI, (t) => t.depensesReelles, true, "total-expenses");
   html += gridTotalRow("Reste à vivre", ids, monthsByI, (t) => t.balance, true, "balance");
   html += "</tbody>";
   table.innerHTML = html;
@@ -977,7 +977,7 @@ function refreshForecastTotals(mid, monthsByI) {
     "st-regulieres": t.byGroup.regulieres,
     "st-occasionnelles": t.byGroup.occasionnelles,
     "st-capital": t.byGroup.capital,
-    "total-expenses": t.totalExpenses,
+    "total-expenses": t.depensesReelles,
     "balance": t.balance
   };
   Object.entries(vals).forEach(([key, v]) => {
