@@ -200,6 +200,34 @@ body {
   vertical-align: middle;
   white-space: nowrap;
 }
+/* Dépense partagée : reste une vraie dépense (pas grisée comme .poste-reserve), juste une
+   étiquette pour la repérer. */
+.poste-tag-shared { background: #eff6ff; border-color: #bfdbfe; color: var(--primary-dark); }
+
+/* Dépense partagée = ligne principale (montant net, comme d'habitude) + sous-ligne pour le
+   montant total réellement débité et le suivi du remboursement de l'autre part. */
+.expense-block { display: flex; flex-direction: column; gap: 4px; }
+.shared-sub {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-left: 26px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.shared-lbl { flex: none; }
+.shared-sub .shared-total-input {
+  flex: none;
+  width: 74px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 6px;
+  font-size: 12px;
+}
+.shared-remb { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+@media (max-width: 640px) {
+  .shared-sub { flex-wrap: wrap; margin-left: 22px; }
+}
 
 /* Revenu = ligne principale + sous-ligne "encaissé X sur Y" avec barre de progression */
 .income-block { display: flex; flex-direction: column; gap: 4px; }
@@ -409,6 +437,22 @@ body {
   padding: 4px;
 }
 .remove-item-btn:hover { color: var(--danger); }
+.rename-input.has-shared-btn { padding-right: 40px; }
+.toggle-shared-btn {
+  position: absolute;
+  top: 50%;
+  right: 20px;
+  transform: translateY(-50%);
+  border: none;
+  background: none;
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 4px;
+  opacity: 0.4;
+  filter: grayscale(1);
+}
+.toggle-shared-btn.active { opacity: 1; filter: none; }
 .forecast-table .add-row td { position: static; background: var(--card-bg); }
 .add-item-btn {
   border: none;
@@ -554,6 +598,10 @@ body {
   .forecast-table .subtotal-row td:first-child,
   .forecast-table .total-row td:first-child { white-space: normal; line-height: 1.15; font-size: 10px; font-weight: 700; }
   .rename-input { padding-right: 20px; font-size: 11.5px; }
+  /* Colonne Poste trop étroite sur mobile pour 2 icônes (✕ + 🤝) : le toggle "partagée"
+     reste accessible depuis un écran plus large, pas la peine de re-élargir la colonne ici. */
+  .rename-input.has-shared-btn { padding-right: 20px; }
+  .toggle-shared-btn { display: none; }
 }
 
 /* Bloc par personne dans le Suivi consolidé */
