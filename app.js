@@ -225,9 +225,11 @@ function computeTotals(cat, data, scope = "famille") {
   // du patrimoine qu'on range ailleurs (compte épargne, etc.), pas une charge de vie.
   const depensesReelles = byGroup.regulieres + byGroup.occasionnelles;
   const revenusReels = totalIncome - epargneIn;   // revenus hors reprise sur l'épargne
-  // Solde / reste à vivre : on part des revenus RÉELS. Si une "Virement de l'épargne"
-  // comble le mois, le solde doit montrer le trou comblé par la réserve, pas le masquer.
-  const balance = revenusReels - totalExpenses;
+  // Solde / reste à vivre : ici on réintègre la reprise sur l'épargne (totalIncome, pas
+  // revenusReels) — l'argent transféré comble vraiment le mois, donc le solde doit refléter
+  // la trésorerie réelle et ne pas plonger dans le négatif à cause de ça. Le fait que ce
+  // mois s'appuie sur l'épargne reste visible via la note sur la carte "Revenus".
+  const balance = totalIncome - totalExpenses;
   const bankBalance = bankFor(data, scope);
   // Reste à vivre réel / solde projeté : l'épargne/investissement pas encore fait(e) quittera
   // quand même le compte courant, donc on la déduit toujours ici (sinon on risque de la
