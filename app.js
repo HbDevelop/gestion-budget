@@ -202,7 +202,8 @@ function computeTotals(cat, data, scope = "famille") {
   let epargneIn = 0;          // "Virement de l'épargne" : reprise sur la réserve, pas un vrai revenu
   let revenusAVenir = 0;      // revenus du mois pas encore cochés "reçu"
   const byGroup = { regulieres: 0, occasionnelles: 0, capital: 0 };
-  let chargesAVenir = 0;      // dépenses du mois pas encore cochées "payé"
+  let chargesAVenir = 0;      // charges réelles (régulières/occasionnelles) pas encore payées
+  let capitalAVenir = 0;      // épargne/investissement du mois pas encore fait(e)
   cat.items.forEach((item) => {
     if (!inScope(item, scope)) return;
     const v = values[item.id];
@@ -213,7 +214,10 @@ function computeTotals(cat, data, scope = "famille") {
       revenusAVenir += Math.max(0, amount - receivedOf(v));
     } else {
       byGroup[item.type] = (byGroup[item.type] || 0) + amount;
-      if (!v || !v.paid) chargesAVenir += amount;
+      if (!v || !v.paid) {
+        if (item.type === "capital") capitalAVenir += amount;
+        else chargesAVenir += amount;
+      }
     }
   });
   const totalExpenses = byGroup.regulieres + byGroup.occasionnelles + byGroup.capital;
@@ -225,12 +229,15 @@ function computeTotals(cat, data, scope = "famille") {
   // comble le mois, le solde doit montrer le trou comblé par la réserve, pas le masquer.
   const balance = revenusReels - totalExpenses;
   const bankBalance = bankFor(data, scope);
-  // Reste à vivre réel : ce qui est sur le compte MAINTENANT, moins ce qu'il reste à payer.
-  const resteAVivreReel = bankBalance - chargesAVenir;
+  // Reste à vivre réel / solde projeté : l'épargne/investissement pas encore fait(e) quittera
+  // quand même le compte courant, donc on la déduit toujours ici (sinon on risque de la
+  // "dépenser" par erreur) — seul l'affichage "Charges à venir" la distingue des vraies factures.
+  const aVenirTotal = chargesAVenir + capitalAVenir;
+  const resteAVivreReel = bankBalance - aVenirTotal;
   // Solde projeté fin de mois : + les revenus encore à encaisser. Chiffre stable qui ne
   // saute pas selon la date à laquelle le salaire (ou les versements de l'Etude) tombent.
-  const soldeProjete = bankBalance + revenusAVenir - chargesAVenir;
-  return { totalIncome, revenusReels, epargneIn, revenusAVenir, byGroup, totalExpenses, depensesReelles, balance, chargesAVenir, resteAVivreReel, soldeProjete, bankBalance };
+  const soldeProjete = bankBalance + revenusAVenir - aVenirTotal;
+  return { totalIncome, revenusReels, epargneIn, revenusAVenir, byGroup, totalExpenses, depensesReelles, balance, chargesAVenir, capitalAVenir, resteAVivreReel, soldeProjete, bankBalance };
 }
 
 // ---- State ----
@@ -271,6 +278,7 @@ const daysLeftEl = $("#days-left");
 const bankBalanceEl = $("#bank-balance");
 const revenusAVenirEl = $("#revenus-a-venir");
 const chargesAVenirEl = $("#charges-a-venir");
+const capitalAVenirEl = $("#capital-a-venir");
 const resteAVivreEl = $("#reste-a-vivre");
 const soldeProjeteEl = $("#solde-projete");
 const dailyAllocationEl = $("#daily-allocation");
@@ -701,7 +709,7 @@ function renderTotals() {
   daysLeftEl.textContent = days;
 
   if (!monthData || !catalog) {
-    [totalIncomeEl, totalExpensesEl, totalCapitalEl, balanceEl, revenusAVenirEl, chargesAVenirEl, resteAVivreEl, soldeProjeteEl, dailyAllocationEl]
+    [totalIncomeEl, totalExpensesEl, totalCapitalEl, balanceEl, revenusAVenirEl, chargesAVenirEl, capitalAVenirEl, resteAVivreEl, soldeProjeteEl, dailyAllocationEl]
       .forEach((elm) => { if (elm) elm.textContent = euros(0); });
     return;
   }
@@ -717,6 +725,7 @@ function renderTotals() {
   balanceEl.classList.toggle("negative", t.balance < 0);
   revenusAVenirEl.textContent = euros(t.revenusAVenir);
   chargesAVenirEl.textContent = euros(t.chargesAVenir);
+  if (capitalAVenirEl) capitalAVenirEl.textContent = euros(t.capitalAVenir);
   resteAVivreEl.textContent = euros(t.resteAVivreReel);
   resteAVivreEl.classList.toggle("negative", t.resteAVivreReel < 0);
   soldeProjeteEl.textContent = euros(t.soldeProjete);
@@ -785,6 +794,7 @@ function famRealtimePanel(days) {
   const famBank = sumBankBalances(monthData);
   const famRevenus = OWNER_KEYS.reduce((s, k) => s + totals[k].revenusAVenir, 0);
   const famUpcoming = OWNER_KEYS.reduce((s, k) => s + totals[k].chargesAVenir, 0);
+  const famCapitalAVenir = OWNER_KEYS.reduce((s, k) => s + totals[k].capitalAVenir, 0);
   const famReste = OWNER_KEYS.reduce((s, k) => s + totals[k].resteAVivreReel, 0);
   const famProjete = OWNER_KEYS.reduce((s, k) => s + totals[k].soldeProjete, 0);
 
@@ -827,6 +837,7 @@ function famRealtimePanel(days) {
 
   body.appendChild(famRtRow("Revenus à venir", OWNER_KEYS.map((k) => totals[k].revenusAVenir), famRevenus));
   body.appendChild(famRtRow("Charges à venir", OWNER_KEYS.map((k) => totals[k].chargesAVenir), famUpcoming));
+  body.appendChild(famRtRow("Épargne/Invest. prévu(e)", OWNER_KEYS.map((k) => totals[k].capitalAVenir), famCapitalAVenir));
   body.appendChild(famRtRow("Reste à vivre réel", OWNER_KEYS.map((k) => totals[k].resteAVivreReel), famReste, true));
   body.appendChild(famRtRow("Solde projeté", OWNER_KEYS.map((k) => totals[k].soldeProjete), famProjete, true));
   body.appendChild(famRtRow("Allocation / jour", OWNER_KEYS.map((k) => totals[k].soldeProjete / days), famProjete / days, true));
