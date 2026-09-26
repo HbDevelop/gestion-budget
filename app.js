@@ -1135,6 +1135,42 @@ function pieOptions(dataset) {
   };
 }
 
+// Série cumulée d'un poste de "réserve" (épargne ou investissement). Pour l'espace "Famille",
+// on calcule la série de CHAQUE personne séparément (base de départ + 1er mois suivi propres à
+// chacune), puis on additionne mois par mois — impossible de sommer les réglages dans une
+// boucle unique : Habib et Marwa n'ont pas le même mois de départ, une base combinée avec un
+// seul point de départ ferait perdre l'historique de celui qui est suivi depuis plus longtemps
+// (c'est ce qui rendait le total Famille différent de Habib + Marwa).
+function reserveCumulSeries(scope, months, settings, { baseKey, startKey, role, outRole, defaultStart }) {
+  const owners = scope === "famille" ? OWNER_KEYS : [scope];
+  const seriesByOwner = owners.map((owner) => {
+    const sc = (settings.byScope && settings.byScope[owner]) || {};
+    const base = sc[baseKey] != null ? sc[baseKey] : (settings[baseKey] || 0);
+    const start = sc[startKey] || settings[startKey] || defaultStart || null;
+    const items = catalog.items.filter((it) => it.role === role && inScope(it, owner));
+    const outItems = outRole ? catalog.items.filter((it) => it.role === outRole && inScope(it, owner)) : [];
+    let cumul = base;
+    const byId = {};
+    (start ? months.filter(({ id }) => id >= start) : months).forEach(({ id, data: d }) => {
+      const values_ = d.values || {};
+      const amount = items.reduce((s, it) => s + ((values_[it.id] && values_[it.id].amount) || 0), 0);
+      const out = outItems.reduce((s, it) => s + ((values_[it.id] && values_[it.id].amount) || 0), 0);
+      cumul += amount - out;
+      byId[id] = cumul;
+    });
+    return byId;
+  });
+  const labels = [];
+  const values = [];
+  months.forEach(({ id }) => {
+    if (seriesByOwner.every((s) => s[id] != null)) {
+      labels.push(monthLabelShort(id));
+      values.push(seriesByOwner.reduce((sum, s) => sum + s[id], 0));
+    }
+  });
+  return { labels, values };
+}
+
 async function renderAnalyse() {
   analyseMonthLabel.textContent = monthLabel(currentMonthId) + " (" + (currentScope === "famille" ? "Famille" : OWNER_LABEL[currentScope]) + ")";
   analyseFamille.classList.toggle("hidden", currentScope !== "famille");
@@ -1173,28 +1209,14 @@ async function renderAnalyse() {
     options: pieOptions(avgData)
   });
 
-  // Réglages épargne/investissement : globaux par défaut (rétro-compat), surchargeables par
-  // espace via settings.byScope[<owner>] = { epargneBase, epargneStart, investissementBase,
-  // investissementStart }. La vue "Famille" garde les valeurs globales.
-  const sc = (currentScope !== "famille" && settings.byScope && settings.byScope[currentScope]) || {};
-  const epargneBase = sc.epargneBase != null ? sc.epargneBase : (settings.epargneBase || 0);
-  const epargneStart = sc.epargneStart || null;
-
   // Épargne cumulée = solde de départ + somme glissante de (Épargne du mois - Virement de
   // l'épargne du mois). L'Investissement n'entre pas en compte : c'est un poste distinct.
-  // Les postes sont restreints à l'espace courant (plusieurs postes "épargne" possibles).
-  const epargneItems = catalog.items.filter((it) => it.role === "epargne" && inScope(it, currentScope));
-  const virementItems = catalog.items.filter((it) => it.role === "epargne_out" && inScope(it, currentScope));
-  let cumul = epargneBase;
-  const labels = [];
-  const values = [];
-  (epargneStart ? months.filter(({ id }) => id >= epargneStart) : months).forEach(({ id, data: d }) => {
-    const values_ = d.values || {};
-    const epargne = epargneItems.reduce((s, it) => s + ((values_[it.id] && values_[it.id].amount) || 0), 0);
-    const virement = virementItems.reduce((s, it) => s + ((values_[it.id] && values_[it.id].amount) || 0), 0);
-    cumul += epargne - virement;
-    labels.push(monthLabelShort(id));
-    values.push(cumul);
+  // Réglages par espace via settings.byScope[<owner>] = { epargneBase, epargneStart,
+  // investissementBase, investissementStart }, avec repli sur les réglages globaux
+  // (rétro-compat). Pour "Famille", reserveCumulSeries somme Habib + Marwa proprement
+  // (voir sa doc) au lieu de réutiliser un seul réglage global pour les deux.
+  const { labels, values } = reserveCumulSeries(currentScope, months, settings, {
+    baseKey: "epargneBase", startKey: "epargneStart", role: "epargne", outRole: "epargne_out"
   });
   charts.line = new Chart($("#chart-line"), {
     type: "line",
@@ -1204,17 +1226,8 @@ async function renderAnalyse() {
 
   // Investissement cumulé = solde de départ (à partir du mois configuré) + somme glissante
   // du poste Investissement, sans soustraction (pas de "retrait d'investissement" suivi).
-  const investissementItems = catalog.items.filter((it) => it.role === "investissement" && inScope(it, currentScope));
-  const invStart = sc.investissementStart || settings.investissementStart || "2026-08";
-  let invCumul = sc.investissementBase != null ? sc.investissementBase : (settings.investissementBase || 0);
-  const invLabels = [];
-  const invValues = [];
-  months.filter(({ id }) => id >= invStart).forEach(({ id, data: d }) => {
-    const values_ = d.values || {};
-    const amount = investissementItems.reduce((s, it) => s + ((values_[it.id] && values_[it.id].amount) || 0), 0);
-    invCumul += amount;
-    invLabels.push(monthLabelShort(id));
-    invValues.push(invCumul);
+  const { labels: invLabels, values: invValues } = reserveCumulSeries(currentScope, months, settings, {
+    baseKey: "investissementBase", startKey: "investissementStart", role: "investissement", defaultStart: "2026-08"
   });
   charts.investment = new Chart($("#chart-investment"), {
     type: "line",
