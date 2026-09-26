@@ -316,7 +316,7 @@ const scopeSwitch = $("#scope-switch");
 const scopeHint = $("#scope-hint");
 const suiviIndividual = $("#suivi-individual");
 const suiviFamille = $("#suivi-famille");
-const analyseFamille = $("#analyse-famille");
+const analyseFamilleCards = document.querySelectorAll(".famille-only");
 const forecastEditToggle = $("#forecast-edit-toggle");
 
 // ---- Sélecteur d'espace ----
@@ -1295,7 +1295,7 @@ function reserveCumulSeries(scope, months, settings, { baseKey, startKey, role, 
 
 async function renderAnalyse() {
   analyseMonthLabel.textContent = monthLabel(currentMonthId) + " (" + (currentScope === "famille" ? "Famille" : OWNER_LABEL[currentScope]) + ")";
-  analyseFamille.classList.toggle("hidden", currentScope !== "famille");
+  analyseFamilleCards.forEach((card) => card.classList.toggle("hidden", currentScope !== "famille"));
   // Toujours relire Firestore (plutôt que de réutiliser monthData) : un montant modifié
   // depuis Prévisions ne met pas à jour l'état en mémoire de l'écran Suivi.
   const data = (await fetchMonth(currentMonthId)) || { values: {} };

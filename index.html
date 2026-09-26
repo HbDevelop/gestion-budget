@@ -6,7 +6,7 @@
   <title>Gestion Budget</title>
   <link rel="icon" type="image/svg+xml" href="favicon.svg?v=1" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2032%2032'%3E%3Crect%20width='32'%20height='32'%20rx='7'%20fill='%232563eb'/%3E%3Ctext%20x='16'%20y='16'%20font-family='Arial,sans-serif'%20font-size='22'%20font-weight='700'%20text-anchor='middle'%20dominant-baseline='central'%20fill='%23fff'%3E%E2%82%AC%3C/text%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="style.css?v=21" />
+  <link rel="stylesheet" href="style.css?v=22" />
   <script src="https://accounts.google.com/gsi/client" async defer></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 </head>
@@ -175,29 +175,33 @@
     <!-- Vue : Analyse budget -->
     <div id="view-analyse" class="view hidden">
       <main class="content">
-        <h2 class="view-title">Analyse — <span id="analyse-month-label"></span></h2>
-        <div id="analyse-famille" class="charts-grid hidden">
-          <section class="card chart-card">
+        <h2 class="view-title">Analyse</h2>
+
+        <h3 class="analyse-section-title">Ce mois-ci — <span id="analyse-month-label"></span></h3>
+        <div class="charts-grid">
+          <section class="card chart-card famille-only hidden">
             <h3>Contribution aux revenus du foyer</h3>
             <canvas id="chart-fam-income"></canvas>
           </section>
-          <section class="card chart-card">
-            <h3>Dépenses du foyer par personne (mois en cours)</h3>
+          <section class="card chart-card famille-only hidden">
+            <h3>Dépenses du foyer par personne</h3>
             <canvas id="chart-fam-split"></canvas>
           </section>
-          <section class="card chart-card chart-wide">
-            <h3>Dépenses par personne, mois par mois</h3>
-            <canvas id="chart-fam-stack"></canvas>
-          </section>
-        </div>
-        <div class="charts-grid">
           <section class="card chart-card">
-            <h3>Répartition globale (mois en cours)</h3>
+            <h3>Répartition globale</h3>
             <canvas id="chart-pie"></canvas>
           </section>
+        </div>
+
+        <h3 class="analyse-section-title">Tendances sur la durée</h3>
+        <div class="charts-grid">
           <section class="card chart-card">
             <h3>Répartition globale moyenne (mois passés)</h3>
             <canvas id="chart-pie-avg"></canvas>
+          </section>
+          <section class="card chart-card chart-wide famille-only hidden">
+            <h3>Dépenses par personne, mois par mois</h3>
+            <canvas id="chart-fam-stack"></canvas>
           </section>
           <section class="card chart-card chart-wide">
             <h3>Évolution de l'épargne cumulée</h3>
@@ -220,6 +224,6 @@
     </div>
   </div>
 
-  <script type="module" src="app.js?v=36"></script>
+  <script type="module" src="app.js?v=37"></script>
 </body>
 </html>
