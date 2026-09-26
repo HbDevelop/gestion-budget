@@ -986,9 +986,16 @@ function buildMonthGrid(table, ids, monthsByI, items, opts) {
   ids.forEach((id) => { html += `<th>${monthLabelShort(id)}</th>`; });
   html += "</tr></thead><tbody>";
 
+  // Vue "Famille" : les postes de Habib et Marwa sont mélangés dans chaque section — on les
+  // regroupe par espace (+ couleur/pastille sur la ligne, voir gridRow) pour qu'on sache tout
+  // de suite qui contribue à quelle ligne, sans avoir à lire chaque libellé.
+  const byOwnerThenSection = (a, b) => {
+    if (currentScope !== "famille") return 0;
+    return OWNER_KEYS.indexOf(a.owner) - OWNER_KEYS.indexOf(b.owner);
+  };
   SECTIONS.forEach((sec) => {
     html += `<tr class="section-row"><td colspan="${ids.length + 1}"><span class="cell-label section-label">${sec.label}</span></td></tr>`;
-    items.filter((it) => it.type === sec.key).forEach((item) => {
+    items.filter((it) => it.type === sec.key).sort(byOwnerThenSection).forEach((item) => {
       html += gridRow(item, ids, monthsByI, opts);
     });
     if (opts.structural) {
@@ -1005,7 +1012,14 @@ function buildMonthGrid(table, ids, monthsByI, items, opts) {
 }
 
 function gridRow(item, ids, monthsByI, opts) {
-  let row = `<tr><td class="poste-cell">`;
+  // En vue "Famille", une bande de couleur (+ pastille) sur la ligne indique tout de suite à
+  // qui appartient le poste, sans devoir déduire ça du libellé au milieu de tous les autres.
+  const ownerStyle = currentScope === "famille" && item.owner
+    ? ` style="border-left-color:${ownerColor(item.owner)}"` : "";
+  const ownerDot = currentScope === "famille" && item.owner
+    ? `<span class="poste-owner-dot" style="--oc:${ownerColor(item.owner)}" title="${escapeAttr(OWNER_LABEL[item.owner] || item.owner)}"></span>`
+    : "";
+  let row = `<tr><td class="poste-cell"${ownerStyle}>${ownerDot}`;
   if (opts.structural) {
     const canShare = item.type === "regulieres" || item.type === "occasionnelles";
     const sharedBtn = canShare
