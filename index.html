@@ -6,7 +6,7 @@
   <title>Gestion Budget</title>
   <link rel="icon" type="image/svg+xml" href="favicon.svg?v=1" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2032%2032'%3E%3Crect%20width='32'%20height='32'%20rx='7'%20fill='%232563eb'/%3E%3Ctext%20x='16'%20y='16'%20font-family='Arial,sans-serif'%20font-size='22'%20font-weight='700'%20text-anchor='middle'%20dominant-baseline='central'%20fill='%23fff'%3E%E2%82%AC%3C/text%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="style.css?v=19" />
+  <link rel="stylesheet" href="style.css?v=20" />
   <script src="https://accounts.google.com/gsi/client" async defer></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 </head>
@@ -121,8 +121,14 @@
             </div>
           </div>
           <div class="allocation-max">
-            <span class="live-label">Allocation journalière</span>
-            <span id="daily-allocation">0 €</span>
+            <div class="allocation-item">
+              <span class="live-label">Allocation réelle / jour</span>
+              <span id="daily-allocation-reelle" class="alloc-value">0 €</span>
+            </div>
+            <div class="allocation-item">
+              <span class="live-label">Allocation projetée / jour</span>
+              <span id="daily-allocation" class="alloc-value">0 €</span>
+            </div>
           </div>
         </section>
 
@@ -214,6 +220,6 @@
     </div>
   </div>
 
-  <script type="module" src="app.js?v=34"></script>
+  <script type="module" src="app.js?v=35"></script>
 </body>
 </html>
