@@ -1358,10 +1358,11 @@ async function renderAnalyse() {
   });
 
   // Reste à vivre de chaque mois (pas cumulé) : la tendance mois après mois, avec les mois
-  // en négatif mis en évidence pour repérer vite les périodes tendues.
+  // en négatif mis en évidence pour repérer vite les périodes tendues. Juin 2026 est exclu :
+  // ce mois a été mal archivé, ses données ne sont pas représentatives.
   const balanceLabels = [];
   const balanceValues = [];
-  months.forEach(({ id, data: d }) => {
+  months.filter(({ id }) => id !== "2026-06").forEach(({ id, data: d }) => {
     balanceLabels.push(monthLabelShort(id));
     balanceValues.push(computeTotals(catalog, d, currentScope).balance);
   });
