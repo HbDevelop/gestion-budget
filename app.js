@@ -30,6 +30,17 @@ function reserveTagHtml(item) {
   return isReserve(item) ? ` <span class="poste-tag">${RESERVE_TAG[item.role]}</span>` : "";
 }
 
+// Dépense "partagée" : le compte de l'espace est débité du montant TOTAL, mais une autre
+// personne rembourse sa part en dehors de l'appli (espèces, virement...). Le poste garde son
+// montant net habituel (utilisé partout : Prévisions, Historique, cartes résumé) — seul le
+// Suivi du mois (mois en cours) a besoin du montant total réel + du statut du remboursement,
+// pour que "Charges à venir" / "Reste à vivre réel" / l'allocation journalière restent justes
+// entre la date du remboursement et la date du prélèvement.
+function isShared(item) { return !!(item && item.role === "partagee"); }
+function sharedTagHtml(item) {
+  return isShared(item) ? ` <span class="poste-tag poste-tag-shared">partagée</span>` : "";
+}
+
 // ---- Espaces budgétaires (voir firebase-config.js) ----
 // Un espace par personne. Chaque poste porte un `owner` ∈ OWNER_KEYS.
 // La vue "Famille" (scope "famille") consolide les espaces.
@@ -214,7 +225,16 @@ function computeTotals(cat, data, scope = "famille") {
       revenusAVenir += Math.max(0, amount - receivedOf(v));
     } else {
       byGroup[item.type] = (byGroup[item.type] || 0) + amount;
-      if (!v || !v.paid) {
+      if (isShared(item)) {
+        // Le compte est débité du montant TOTAL (pas juste la part nette `amount`) tant que
+        // ce n'est pas payé ; la part remboursée par l'autre personne est un revenu à venir
+        // tant que le remboursement n'est pas reçu. `amount` (net) continue seul d'alimenter
+        // byGroup/Dépenses/Prévisions ci-dessus : rien ne change de ce côté-là.
+        const montantTotal = (v && v.montantTotal != null) ? v.montantTotal : amount;
+        const partAutre = Math.max(0, montantTotal - amount);
+        if (!v || !v.paid) chargesAVenir += montantTotal;
+        if (!v || !v.remboursementRecu) revenusAVenir += partAutre;
+      } else if (!v || !v.paid) {
         if (item.type === "capital") capitalAVenir += amount;
         else chargesAVenir += amount;
       }
@@ -646,29 +666,65 @@ function renderExpenseGroups() {
 function buildSuiviRow(item) {
   const current = () => monthData.values[item.id] || { amount: 0, paid: false };
   const v0 = current();
+  const shared = isShared(item);
   const div = document.createElement("div");
   div.className = "row" + (isReserve(item) ? " poste-reserve" : "");
   div.innerHTML = `
     <input type="checkbox" class="paid-check" ${v0.paid ? "checked" : ""} title="Payé" />
-    <span class="label-text">${escapeHtml(item.label)}${reserveTagHtml(item)}</span>
+    <span class="label-text">${escapeHtml(item.label)}${reserveTagHtml(item)}${sharedTagHtml(item)}</span>
     <input type="number" class="amount-input" value="${v0.amount}" step="0.01" />
   `;
   const amountInput = div.querySelector(".amount-input");
   const paidCheck = div.querySelector(".paid-check");
 
+  // Les handlers préservent les champs additionnels (montantTotal, remboursementRecu pour
+  // une dépense partagée) via {...c, ...} au lieu de reconstruire l'objet from scratch.
   amountInput.addEventListener("input", () => {
     const c = current();
-    monthData.values[item.id] = { amount: parseFloat(amountInput.value) || 0, paid: c.paid };
+    monthData.values[item.id] = { ...c, amount: parseFloat(amountInput.value) || 0 };
     renderTotals();
     scheduleSave();
   });
   paidCheck.addEventListener("change", () => {
     const c = current();
-    monthData.values[item.id] = { amount: c.amount, paid: paidCheck.checked };
+    monthData.values[item.id] = { ...c, paid: paidCheck.checked };
     renderTotals();
     scheduleSave();
   });
-  return div;
+  if (!shared) return div;
+
+  // Dépense partagée : sous-ligne pour le montant total réellement débité du compte, et le
+  // suivi du remboursement de l'autre part — indépendant de la case "Payé" ci-dessus, qui ne
+  // concerne que le prélèvement total lui-même.
+  const block = el("div", "expense-block");
+  block.appendChild(div);
+  const sub = document.createElement("div");
+  sub.className = "shared-sub";
+  const total0 = v0.montantTotal != null ? v0.montantTotal : v0.amount;
+  sub.innerHTML = `
+    <span class="shared-lbl">total débité</span>
+    <input type="number" class="shared-total-input" value="${total0}" step="0.01" />
+    <label class="shared-remb">
+      <input type="checkbox" class="shared-remb-check" ${v0.remboursementRecu ? "checked" : ""} />
+      remboursement reçu
+    </label>
+  `;
+  const totalInput = sub.querySelector(".shared-total-input");
+  const rembCheck = sub.querySelector(".shared-remb-check");
+  totalInput.addEventListener("input", () => {
+    const c = current();
+    monthData.values[item.id] = { ...c, montantTotal: parseFloat(totalInput.value) || 0 };
+    renderTotals();
+    scheduleSave();
+  });
+  rembCheck.addEventListener("change", () => {
+    const c = current();
+    monthData.values[item.id] = { ...c, remboursementRecu: rembCheck.checked };
+    renderTotals();
+    scheduleSave();
+  });
+  block.appendChild(sub);
+  return block;
 }
 
 // Ligne en lecture seule pour la vue consolidée (l'édition des montants se fait dans
@@ -941,10 +997,16 @@ function buildMonthGrid(table, ids, monthsByI, items, opts) {
 function gridRow(item, ids, monthsByI, opts) {
   let row = `<tr><td class="poste-cell">`;
   if (opts.structural) {
-    row += `<input type="text" class="rename-input" value="${escapeAttr(item.label)}" data-item-id="${item.id}" />
+    const canShare = item.type === "regulieres" || item.type === "occasionnelles";
+    const sharedBtn = canShare
+      ? `<button type="button" class="toggle-shared-btn${isShared(item) ? " active" : ""}" data-item-id="${item.id}"
+          title="${isShared(item) ? "Dépense partagée — cliquer pour retirer" : "Marquer comme dépense partagée (remboursée en partie par l'autre)"}">🤝</button>`
+      : "";
+    row += `<input type="text" class="rename-input${sharedBtn ? " has-shared-btn" : ""}" value="${escapeAttr(item.label)}" data-item-id="${item.id}" />
+      ${sharedBtn}
       <button type="button" class="remove-item-btn" data-item-id="${item.id}" title="Supprimer ce poste">✕</button>`;
   } else {
-    row += `<span class="cell-label poste-label${isReserve(item) ? " poste-reserve" : ""}" title="${escapeAttr(item.label)}">${escapeHtml(item.label)}${reserveTagHtml(item)}</span>`;
+    row += `<span class="cell-label poste-label${isReserve(item) ? " poste-reserve" : ""}" title="${escapeAttr(item.label)}">${escapeHtml(item.label)}${reserveTagHtml(item)}${sharedTagHtml(item)}</span>`;
   }
   row += `</td>`;
   ids.forEach((id) => {
@@ -1035,6 +1097,9 @@ async function renderForecast() {
   forecastTable.querySelectorAll(".remove-item-btn").forEach((btn) => {
     btn.addEventListener("click", () => removeItem(btn.dataset.itemId, ids, monthsByI));
   });
+  forecastTable.querySelectorAll(".toggle-shared-btn").forEach((btn) => {
+    btn.addEventListener("click", () => toggleShared(btn.dataset.itemId));
+  });
   forecastTable.querySelectorAll(".add-item-btn").forEach((btn) => {
     btn.addEventListener("click", () => addItem(btn.dataset.type));
   });
@@ -1080,6 +1145,15 @@ async function renameItem(itemId, newLabel) {
   const trimmed = newLabel.trim();
   if (!item || !trimmed || trimmed === item.label) return;
   item.label = trimmed;
+  await persistCatalog(catalog);
+  await renderForecast();
+}
+
+async function toggleShared(itemId) {
+  const item = catalog.items.find((it) => it.id === itemId);
+  if (!item) return;
+  if (isShared(item)) delete item.role;
+  else item.role = "partagee";
   await persistCatalog(catalog);
   await renderForecast();
 }
