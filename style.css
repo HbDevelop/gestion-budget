@@ -409,7 +409,18 @@ body {
 }
 /* Mode édition : le champ de renommage occupe toute la cellule, le ✕ est en overlay
    dans le coin — la colonne "Poste" ne s'élargit donc pas pour le loger. */
-.poste-cell { position: relative; display: flex; align-items: center; }
+.poste-cell { position: relative; display: flex; align-items: center; border-left: 3px solid transparent; }
+/* Vue "Famille" des tableaux Prévisions/Historique : bande de couleur + pastille sur la ligne
+   pour voir immédiatement à qui appartient le poste (Habib/Marwa), sans lire chaque libellé. */
+.poste-owner-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: var(--oc, var(--text-muted));
+  margin-right: 6px;
+  flex: none;
+}
 .rename-input {
   border: 1px solid transparent;
   border-radius: 6px;
