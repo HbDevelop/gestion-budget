@@ -186,8 +186,12 @@ function ownerKindSum(data, scope, kind) {
   return catalog.items.reduce((s, it) => {
     if (it.owner !== scope) return s;
     const isIncome = it.type === "income";
+    const isCapital = it.type === "capital";
     if (kind === "income" && (!isIncome || it.role === "epargne_out")) return s;
-    if (kind === "expense" && isIncome) return s;
+    // "expense" = dépenses réelles uniquement : l'épargne/investissement (capital) a son
+    // propre kind, ce n'est pas une charge de vie.
+    if (kind === "expense" && (isIncome || isCapital)) return s;
+    if (kind === "capital" && !isCapital) return s;
     return s + ((values[it.id] && values[it.id].amount) || 0);
   }, 0);
 }
@@ -213,6 +217,9 @@ function computeTotals(cat, data, scope = "famille") {
     }
   });
   const totalExpenses = byGroup.regulieres + byGroup.occasionnelles + byGroup.capital;
+  // Dépenses réelles : hors épargne/investissement, qui ne sont pas de l'argent perdu mais
+  // du patrimoine qu'on range ailleurs (compte épargne, etc.), pas une charge de vie.
+  const depensesReelles = byGroup.regulieres + byGroup.occasionnelles;
   const revenusReels = totalIncome - epargneIn;   // revenus hors reprise sur l'épargne
   // Solde / reste à vivre : on part des revenus RÉELS. Si une "Virement de l'épargne"
   // comble le mois, le solde doit montrer le trou comblé par la réserve, pas le masquer.
@@ -223,7 +230,7 @@ function computeTotals(cat, data, scope = "famille") {
   // Solde projeté fin de mois : + les revenus encore à encaisser. Chiffre stable qui ne
   // saute pas selon la date à laquelle le salaire (ou les versements de l'Etude) tombent.
   const soldeProjete = bankBalance + revenusAVenir - chargesAVenir;
-  return { totalIncome, revenusReels, epargneIn, revenusAVenir, byGroup, totalExpenses, balance, chargesAVenir, resteAVivreReel, soldeProjete, bankBalance };
+  return { totalIncome, revenusReels, epargneIn, revenusAVenir, byGroup, totalExpenses, depensesReelles, balance, chargesAVenir, resteAVivreReel, soldeProjete, bankBalance };
 }
 
 // ---- State ----
@@ -258,6 +265,7 @@ const incomeList = $("#income-list");
 const totalIncomeEl = $("#total-income");
 const incomeNoteEl = $("#income-note");
 const totalExpensesEl = $("#total-expenses");
+const totalCapitalEl = $("#total-capital");
 const balanceEl = $("#balance");
 const daysLeftEl = $("#days-left");
 const bankBalanceEl = $("#bank-balance");
@@ -693,7 +701,7 @@ function renderTotals() {
   daysLeftEl.textContent = days;
 
   if (!monthData || !catalog) {
-    [totalIncomeEl, totalExpensesEl, balanceEl, revenusAVenirEl, chargesAVenirEl, resteAVivreEl, soldeProjeteEl, dailyAllocationEl]
+    [totalIncomeEl, totalExpensesEl, totalCapitalEl, balanceEl, revenusAVenirEl, chargesAVenirEl, resteAVivreEl, soldeProjeteEl, dailyAllocationEl]
       .forEach((elm) => { if (elm) elm.textContent = euros(0); });
     return;
   }
@@ -703,7 +711,8 @@ function renderTotals() {
     incomeNoteEl.textContent = t.epargneIn > 0 ? "+ " + euros(t.epargneIn) + " repris de l'épargne" : "";
     incomeNoteEl.classList.toggle("hidden", !(t.epargneIn > 0));
   }
-  totalExpensesEl.textContent = euros(t.totalExpenses);
+  totalExpensesEl.textContent = euros(t.depensesReelles);
+  if (totalCapitalEl) totalCapitalEl.textContent = euros(t.byGroup.capital);
   balanceEl.textContent = euros(t.balance);
   balanceEl.classList.toggle("negative", t.balance < 0);
   revenusAVenirEl.textContent = euros(t.revenusAVenir);
@@ -734,7 +743,8 @@ function renderFamilleSuivi() {
   // 1. Cartes résumé, avec ventilation par personne (flux avec l'extérieur du foyer)
   const summary = el("section", "summary summary-fam");
   summary.appendChild(famSummaryCard("Revenus du foyer", fam.revenusReels, "income", fam.epargneIn));
-  summary.appendChild(famSummaryCard("Dépenses du foyer", fam.totalExpenses, "expense"));
+  summary.appendChild(famSummaryCard("Dépenses du foyer", fam.depensesReelles, "expense"));
+  summary.appendChild(famSummaryCard("Épargne & Investissement", fam.byGroup.capital, "capital"));
   const soldeCard = famSummaryCard("Solde consolidé", fam.balance, null);
   soldeCard.querySelector(".summary-value").classList.toggle("negative", fam.balance < 0);
   summary.appendChild(soldeCard);
@@ -868,7 +878,8 @@ function famPersonBlock(owner) {
   } else {
     const sub = el("div", "pb-sub",
       `<span>Revenus <b>${euros(t.revenusReels)}</b></span>` +
-      `<span>Dépenses <b>${euros(t.totalExpenses)}</b></span>` +
+      `<span>Dépenses <b>${euros(t.depensesReelles)}</b></span>` +
+      (t.byGroup.capital > 0 ? `<span>Épargne <b>${euros(t.byGroup.capital)}</b></span>` : "") +
       `<span>Solde <b class="${t.balance < 0 ? "negative" : ""}">${euros(t.balance)}</b></span>`);
     bodyEl.appendChild(sub);
   }
