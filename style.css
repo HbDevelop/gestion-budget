@@ -489,7 +489,8 @@ body {
 
 /* Cartes résumé du consolidé, avec ventilation par personne */
 .summary-fam { grid-template-columns: 1fr; }
-@media (min-width: 640px) { .summary-fam { grid-template-columns: repeat(3, 1fr); } }
+@media (min-width: 640px) { .summary-fam { grid-template-columns: repeat(2, 1fr); } }
+@media (min-width: 900px) { .summary-fam { grid-template-columns: repeat(4, 1fr); } }
 .summary-split {
   display: flex;
   flex-wrap: wrap;
