@@ -294,11 +294,13 @@ body {
   padding-top: 16px;
   border-top: 1px solid var(--border);
   display: flex;
-  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 16px 24px;
   justify-content: space-between;
 }
-.allocation-max span:last-child { font-size: 32px; font-weight: 700; color: var(--primary); }
-.allocation-max span:last-child.negative { color: var(--danger); }
+.allocation-item { display: flex; flex-direction: column; gap: 4px; }
+.alloc-value { font-size: 26px; font-weight: 700; color: var(--primary); }
+.alloc-value.negative { color: var(--danger); }
 
 .table-scroll {
   overflow: auto;

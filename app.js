@@ -306,6 +306,7 @@ const capitalAVenirEl = $("#capital-a-venir");
 const resteAVivreEl = $("#reste-a-vivre");
 const soldeProjeteEl = $("#solde-projete");
 const dailyAllocationEl = $("#daily-allocation");
+const dailyAllocationReelleEl = $("#daily-allocation-reelle");
 const emptyMonthBanner = $("#empty-month-banner");
 const createMonthBtn = $("#create-month-btn");
 const historyTable = $("#history-table");
@@ -769,7 +770,7 @@ function renderTotals() {
   daysLeftEl.textContent = days;
 
   if (!monthData || !catalog) {
-    [totalIncomeEl, totalExpensesEl, totalCapitalEl, balanceEl, revenusAVenirEl, chargesAVenirEl, capitalAVenirEl, resteAVivreEl, soldeProjeteEl, dailyAllocationEl]
+    [totalIncomeEl, totalExpensesEl, totalCapitalEl, balanceEl, revenusAVenirEl, chargesAVenirEl, capitalAVenirEl, resteAVivreEl, soldeProjeteEl, dailyAllocationEl, dailyAllocationReelleEl]
       .forEach((elm) => { if (elm) elm.textContent = euros(0); });
     return;
   }
@@ -791,7 +792,13 @@ function renderTotals() {
   soldeProjeteEl.textContent = euros(t.soldeProjete);
   soldeProjeteEl.classList.toggle("negative", t.soldeProjete < 0);
 
-  // Allocation journalière = solde projeté (revenus à venir inclus) / jours restants.
+  // Allocation réelle = seulement l'argent déjà sur le compte aujourd'hui (reste à vivre réel).
+  if (dailyAllocationReelleEl) {
+    const allocationReelle = days > 0 ? t.resteAVivreReel / days : t.resteAVivreReel;
+    dailyAllocationReelleEl.textContent = euros(allocationReelle);
+    dailyAllocationReelleEl.classList.toggle("negative", allocationReelle < 0);
+  }
+  // Allocation projetée = solde projeté (revenus à venir inclus) / jours restants.
   const allocation = days > 0 ? t.soldeProjete / days : t.soldeProjete;
   dailyAllocationEl.textContent = euros(allocation);
   dailyAllocationEl.classList.toggle("negative", allocation < 0);
@@ -900,7 +907,8 @@ function famRealtimePanel(days) {
   body.appendChild(famRtRow("Épargne/Invest. prévu(e)", OWNER_KEYS.map((k) => totals[k].capitalAVenir), famCapitalAVenir));
   body.appendChild(famRtRow("Reste à vivre réel", OWNER_KEYS.map((k) => totals[k].resteAVivreReel), famReste, true));
   body.appendChild(famRtRow("Solde projeté", OWNER_KEYS.map((k) => totals[k].soldeProjete), famProjete, true));
-  body.appendChild(famRtRow("Allocation / jour", OWNER_KEYS.map((k) => totals[k].soldeProjete / days), famProjete / days, true));
+  body.appendChild(famRtRow("Allocation réelle / jour", OWNER_KEYS.map((k) => totals[k].resteAVivreReel / days), famReste / days, true));
+  body.appendChild(famRtRow("Allocation projetée / jour", OWNER_KEYS.map((k) => totals[k].soldeProjete / days), famProjete / days, true));
 
   table.appendChild(body);
   card.appendChild(table);
