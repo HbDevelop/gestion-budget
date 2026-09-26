@@ -230,7 +230,9 @@ function computeTotals(cat, data, scope = "famille") {
         // ce n'est pas payé ; la part remboursée par l'autre personne est un revenu à venir
         // tant que le remboursement n'est pas reçu. `amount` (net) continue seul d'alimenter
         // byGroup/Dépenses/Prévisions ci-dessus : rien ne change de ce côté-là.
-        const montantTotal = (v && v.montantTotal != null) ? v.montantTotal : amount;
+        // Par défaut (tant que le montant total réel n'est pas saisi) : une dépense partagée
+        // se répartit à 50/50, donc le montant total = le double de la part nette (`amount`).
+        const montantTotal = (v && v.montantTotal != null) ? v.montantTotal : amount * 2;
         const partAutre = Math.max(0, montantTotal - amount);
         if (!v || !v.paid) chargesAVenir += montantTotal;
         if (!v || !v.remboursementRecu) revenusAVenir += partAutre;
@@ -700,7 +702,7 @@ function buildSuiviRow(item) {
   block.appendChild(div);
   const sub = document.createElement("div");
   sub.className = "shared-sub";
-  const total0 = v0.montantTotal != null ? v0.montantTotal : v0.amount;
+  const total0 = v0.montantTotal != null ? v0.montantTotal : v0.amount * 2;
   sub.innerHTML = `
     <span class="shared-lbl">total débité</span>
     <input type="number" class="shared-total-input" value="${total0}" step="0.01" />
