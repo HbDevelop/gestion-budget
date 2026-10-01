@@ -1453,12 +1453,16 @@ function objectifEpargne(scope, series, monthsById, curId, cibleMois, targetId) 
 
 function objectifKey(scope) { return "budget-objectif-" + scope; }
 
-// Bloc "Objectif" dans la carte autonomie : palier visé + échéance (mémorisés par espace dans
-// ce navigateur), et l'effort mensuel nécessaire. Ne relit rien dans Firestore au changement.
+// Carte "Simulateur d'objectif" (sous la carte autonomie) : palier visé + échéance (mémorisés
+// par espace dans ce navigateur) à gauche, effort mensuel nécessaire à droite. Ne relit rien
+// dans Firestore au changement.
 function renderObjectif(box, scope, series, monthsById, curId, niveauActuel) {
   const moisOptions = series.ids.filter((id) => id > curId).slice(0, 12);
+  const titre = `<h3>Simulateur d'objectif</h3>`;
   if (!moisOptions.length) {
-    box.innerHTML = `<span class="cv-path-lbl">Objectif</span> <span class="cv-goal-empty">Ajoute des mois dans Prévisions pour fixer un objectif.</span>`;
+    box.className = "card objectif-card";
+    box.innerHTML = `<div class="obj-form">${titre}</div>
+      <p class="cv-goal-empty">Ajoute des mois dans Prévisions pour simuler un objectif.</p>`;
     return;
   }
   const cibles = COUVERTURE_NIVEAUX.filter((n) => n.min > 0);
@@ -1469,11 +1473,11 @@ function renderObjectif(box, scope, series, monthsById, curId, niveauActuel) {
   let target = moisOptions.includes(saved.mois) ? saved.mois : moisOptions[moisOptions.length - 1];
 
   box.innerHTML = `
-    <div class="cv-goal-head">
-      <span class="cv-path-lbl">Objectif</span>
-      <label>atteindre <select class="cv-goal-niveau" aria-label="Palier visé">${cibles.map((n) =>
+    <div class="obj-form">
+      ${titre}
+      <label>Atteindre <select class="cv-goal-niveau">${cibles.map((n) =>
         `<option value="${n.min}">${n.label} (${n.min} mois)</option>`).join("")}</select></label>
-      <label>d'ici <select class="cv-goal-mois" aria-label="Échéance">${moisOptions.map((id) =>
+      <label>d'ici <select class="cv-goal-mois">${moisOptions.map((id) =>
         `<option value="${id}">${monthLabel(id)}</option>`).join("")}</select></label>
     </div>
     <div class="cv-goal-res"></div>`;
@@ -1489,7 +1493,7 @@ function renderObjectif(box, scope, series, monthsById, curId, niveauActuel) {
     lsSet(objectifKey(scope), JSON.stringify({ min: cible.min, mois: target }));
     const o = objectifEpargne(scope, series, monthsById, curId, cible.min, target);
     const quand = monthLabel(target);
-    box.className = "cv-goal " + (o.gap <= 0 ? "ok" : "effort");
+    box.className = "card objectif-card " + (o.gap <= 0 ? "ok" : "effort");
     res.innerHTML = o.gap <= 0
       ? `<span class="cv-goal-big">✓ Atteint</span>
          <span class="cv-goal-txt">avec l'épargne déjà prévue : <b>${euros(o.projected)}</b> en ${quand}
@@ -1598,7 +1602,6 @@ function renderCouverture(container, scope, c, curId, paliers = [], lastPrevuId 
       <div class="cv-months" aria-label="Mois couverts sur les 12 prochains mois">${cellsHtml}</div>
       ${beyond}
       ${pathHtml}
-      <div class="cv-goal"></div>
       <dl class="cv-facts">
         <div><dt>Épargne actuelle</dt><dd>${euros(c.savings)}</dd></div>
         <div><dt>Besoin moyen / mois</dt><dd>${euros(c.avgCost)}</dd></div>
@@ -1774,7 +1777,7 @@ async function renderAnalyse() {
   const paliers = paliersPrevus(currentScope, epargneSeries, monthsById, curId, niveauOf(couverture.months));
   const lastPrevuId = epargneSeries.ids.filter((id) => id > curId).pop() || null;
   renderCouverture($("#epargne-couverture"), currentScope, couverture, curId, paliers, lastPrevuId);
-  renderObjectif($("#epargne-couverture .cv-goal"), currentScope, epargneSeries, monthsById, curId, niveauOf(couverture.months));
+  renderObjectif($("#epargne-objectif"), currentScope, epargneSeries, monthsById, curId, niveauOf(couverture.months));
   charts.line = cumulLineChart($("#chart-line"), epargneSeries, "Épargne cumulée", "#2563eb",
     paliers.map((p) => ({ index: p.index, label: `${p.up ? "↗" : "↘"} ${p.niveau.label}`, color: p.niveau.color })));
 

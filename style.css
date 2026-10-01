@@ -609,35 +609,40 @@ body {
 .cv-arrow { color: var(--text-muted); }
 .cv-path-flat { color: var(--text-muted); }
 .cv-path-flat b { color: var(--lc); }
-/* Objectif d'épargne : choix palier + échéance, puis l'effort mensuel en gros */
-.cv-goal {
+/* Simulateur d'objectif : carte à part sous l'autonomie, même découpe en deux colonnes
+   (choix à gauche, effort mensuel à droite) ; bleu tant qu'un effort est nécessaire, vert si atteint */
+.objectif-card {
   --gc: var(--primary);
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
-  padding: 10px 12px;
-  border-radius: 8px;
-  border: 1px dashed var(--gc);
-  background: color-mix(in srgb, var(--gc) 6%, #fff);
-  font-size: 12px;
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 14px;
+  border-left: 5px solid var(--gc);
+  font-size: 13px;
 }
-.cv-goal.ok { --gc: var(--success); }
-.cv-goal-head { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; color: var(--text-muted); }
-.cv-goal-head select {
+.objectif-card.ok { --gc: var(--success); }
+@media (min-width: 640px) {
+  .objectif-card { grid-template-columns: 200px minmax(0, 1fr); gap: 24px; align-items: center; }
+  .obj-form { padding-right: 24px; border-right: 1px solid var(--border); }
+}
+.objectif-card h3 { margin: 0; font-size: 15px; white-space: nowrap; }
+.obj-form { display: flex; flex-direction: column; gap: 8px; }
+.obj-form label { display: flex; flex-direction: column; gap: 3px; font-size: 11px; color: var(--text-muted); }
+.obj-form select {
   font: inherit;
+  font-size: 13px;
   font-weight: 600;
   color: var(--text);
-  padding: 3px 6px;
+  padding: 5px 8px;
   border: 1px solid var(--border);
   border-radius: 6px;
   background: #fff;
 }
-.cv-goal-res { display: flex; align-items: center; gap: 12px; }
-.cv-goal-big { flex: none; font-size: 22px; font-weight: 700; color: var(--gc); font-variant-numeric: tabular-nums; white-space: nowrap; }
-.cv-goal-big small { font-size: 12px; font-weight: 600; }
-.cv-goal-txt { color: var(--text-muted); line-height: 1.4; }
+.cv-goal-res { display: flex; align-items: center; gap: 16px; }
+.cv-goal-big { flex: none; font-size: 28px; font-weight: 700; color: var(--gc); font-variant-numeric: tabular-nums; white-space: nowrap; }
+.cv-goal-big small { font-size: 13px; font-weight: 600; }
+.cv-goal-txt { color: var(--text-muted); line-height: 1.45; }
 .cv-goal-txt b { color: var(--text); }
-.cv-goal-empty { color: var(--text-muted); }
+.cv-goal-empty { margin: 0; color: var(--text-muted); }
 @media (max-width: 480px) { .cv-goal-res { flex-direction: column; align-items: flex-start; gap: 4px; } }
 .cv-more { margin: -6px 0 0; font-size: 11px; color: var(--text-muted); text-align: right; }
 /* Trois chiffres côte à côte : libellé au-dessus, valeur en dessous */
