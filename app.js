@@ -1418,20 +1418,25 @@ function renderCouverture(container, scope, c, curId) {
     cellsHtml += `<div class="cv-month" title="${escapeAttr(title)}"><div class="cv-cell"><i style="width:${pct}%"></i></div><span>${monthInitial(id)}</span></div>`;
   }
   const beyond = c.months > 12 ? `<p class="cv-more">+ ${c.capped ? "plus de " : ""}${Math.floor(c.months - 12)} mois au-delà</p>` : "";
-  const people = scope === "famille" ? ` <small>(${OWNER_KEYS.length} × ${POCKET_MONEY} €)</small>` : "";
+  const people = scope === "famille" ? `<small>${OWNER_KEYS.length} × ${POCKET_MONEY} €</small>` : "";
 
+  // Carte en bandeau sous la courbe : chiffre clé à gauche, frise + détail à droite.
   container.innerHTML = `
-    <h3>Autonomie de l'épargne</h3>
-    <div class="cv-hero"><span class="cv-big">${big}</span>${c.capped ? "" : '<span class="cv-unit">mois</span>'}<span class="cv-badge">${badge}</span></div>
-    <p class="cv-until">${until}</p>
-    <div class="cv-months" aria-label="Mois couverts sur les 12 prochains mois">${cellsHtml}</div>
-    ${beyond}
-    <dl class="cv-facts">
-      <div><dt>Épargne actuelle</dt><dd>${euros(c.savings)}</dd></div>
-      <div><dt>Besoin moyen / mois</dt><dd>${euros(c.avgCost)}</dd></div>
-      <div><dt>dont poche${people}</dt><dd>${euros(c.pocket)}</dd></div>
-    </dl>
-    <p class="cv-note">Dépenses prévues des mois suivants (Prévisions, hors épargne et investissement) + argent de poche. Au-delà des mois prévus : moyenne des mois prévus.</p>`;
+    <div class="cv-main">
+      <h3>Autonomie de l'épargne</h3>
+      <div class="cv-hero"><span class="cv-big">${big}</span>${c.capped ? "" : '<span class="cv-unit">mois</span>'}<span class="cv-badge">${badge}</span></div>
+      <p class="cv-until">${until}</p>
+    </div>
+    <div class="cv-side">
+      <div class="cv-months" aria-label="Mois couverts sur les 12 prochains mois">${cellsHtml}</div>
+      ${beyond}
+      <dl class="cv-facts">
+        <div><dt>Épargne actuelle</dt><dd>${euros(c.savings)}</dd></div>
+        <div><dt>Besoin moyen / mois</dt><dd>${euros(c.avgCost)}</dd></div>
+        <div><dt>dont poche / mois</dt><dd>${euros(c.pocket)}${people}</dd></div>
+      </dl>
+      <p class="cv-note">Chaque mois à partir du mois prochain : dépenses prévues (Prévisions, hors épargne et investissement) + argent de poche. Au-delà des mois prévus : moyenne des mois prévus.</p>
+    </div>`;
 }
 
 // Courbe cumulée (épargne / investissement) avec le point du mois en cours mis en valeur :
