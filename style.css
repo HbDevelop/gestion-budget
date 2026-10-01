@@ -503,6 +503,24 @@ body {
 .chart-card { max-width: 100%; }
 .chart-card canvas { max-height: 320px; }
 
+/* Cartes de répartition : bande de couleur + étiquette pour les reconnaître sans lire le titre
+   (bleu = ce mois-ci, gris = moyenne, vert = revenus, rouge = dépenses) */
+.chart-accent { border-top: 4px solid var(--accent); }
+.chart-accent h3 { display: flex; align-items: center; flex-wrap: wrap; gap: 6px; color: var(--text-muted); font-weight: 500; }
+.chart-tag {
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--accent);
+}
+.accent-now { --accent: var(--primary); }
+.accent-avg { --accent: #6b7280; }
+.accent-avg .chart-tag { color: var(--accent); background: transparent; box-shadow: inset 0 0 0 1.5px var(--accent); }
+.accent-in { --accent: var(--success); }
+.accent-out { --accent: var(--danger); }
+
 /* Épargne cumulée (pleine largeur) + bandeau "autonomie" juste en dessous */
 .epargne-row { display: grid; grid-template-columns: 1fr; gap: 12px; min-width: 0; }
 .epargne-row > .chart-card { min-width: 0; }

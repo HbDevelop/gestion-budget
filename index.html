@@ -6,7 +6,7 @@
   <title>Gestion Budget</title>
   <link rel="icon" type="image/svg+xml" href="favicon.svg?v=1" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2032%2032'%3E%3Crect%20width='32'%20height='32'%20rx='7'%20fill='%232563eb'/%3E%3Ctext%20x='16'%20y='16'%20font-family='Arial,sans-serif'%20font-size='22'%20font-weight='700'%20text-anchor='middle'%20dominant-baseline='central'%20fill='%23fff'%3E%E2%82%AC%3C/text%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="style.css?v=27" />
+  <link rel="stylesheet" href="style.css?v=28" />
   <script src="https://accounts.google.com/gsi/client" async defer></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 </head>
@@ -203,20 +203,21 @@
 
         <h3 class="analyse-section-title">Répartition du budget</h3>
         <div class="charts-grid">
-          <section class="card chart-card">
-            <h3>Ce mois-ci · <span id="analyse-month-label"></span></h3>
+          <!-- Chaque carte a sa couleur + une étiquette : on les distingue sans lire le titre -->
+          <section class="card chart-card chart-accent accent-now">
+            <h3><span class="chart-tag">Ce mois-ci</span> <span id="analyse-month-label"></span></h3>
             <canvas id="chart-pie"></canvas>
           </section>
-          <section class="card chart-card">
-            <h3>Moyenne des mois passés</h3>
+          <section class="card chart-card chart-accent accent-avg">
+            <h3><span class="chart-tag">Moyenne</span> des mois passés</h3>
             <canvas id="chart-pie-avg"></canvas>
           </section>
-          <section class="card chart-card famille-only hidden">
-            <h3>Revenus par personne (ce mois-ci)</h3>
+          <section class="card chart-card chart-accent accent-in famille-only hidden">
+            <h3><span class="chart-tag">Revenus</span> par personne, ce mois-ci</h3>
             <canvas id="chart-fam-income"></canvas>
           </section>
-          <section class="card chart-card famille-only hidden">
-            <h3>Dépenses par personne (ce mois-ci)</h3>
+          <section class="card chart-card chart-accent accent-out famille-only hidden">
+            <h3><span class="chart-tag">Dépenses</span> par personne, ce mois-ci</h3>
             <canvas id="chart-fam-split"></canvas>
           </section>
         </div>
@@ -240,6 +241,6 @@
     </div>
   </div>
 
-  <script type="module" src="app.js?v=50"></script>
+  <script type="module" src="app.js?v=51"></script>
 </body>
 </html>
