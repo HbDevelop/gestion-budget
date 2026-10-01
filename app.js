@@ -1590,12 +1590,19 @@ async function renderAnalyse() {
   // Reste à vivre de chaque mois (pas cumulé) : la tendance mois après mois, avec les mois
   // en négatif mis en évidence pour repérer vite les périodes tendues. Juin 2026 est exclu :
   // ce mois a été mal archivé, ses données ne sont pas représentatives.
+  const balanceIds = [];
   const balanceLabels = [];
   const balanceValues = [];
   months.filter(({ id }) => id !== "2026-06").forEach(({ id, data: d }) => {
+    balanceIds.push(id);
     balanceLabels.push(monthLabelShort(id));
     balanceValues.push(computeTotals(catalog, d, currentScope).balance);
   });
+  // Mois en cours mis en valeur comme sur les courbes cumulées : point agrandi cerclé de blanc
+  // + étiquette avec sa valeur (en rouge si le reste à vivre du mois est négatif).
+  const balanceIdx = balanceIds.indexOf(monthId(new Date()));
+  const balanceColor = (v) => (v < 0 ? "#dc2626" : "#7c3aed");
+  const isCur = (i) => i === balanceIdx;
   charts.balance = new Chart($("#chart-balance"), {
     type: "line",
     data: {
@@ -1605,11 +1612,21 @@ async function renderAnalyse() {
         data: balanceValues,
         borderColor: "#7c3aed",
         tension: 0.3,
-        pointBackgroundColor: balanceValues.map((v) => (v < 0 ? "#dc2626" : "#7c3aed")),
-        pointRadius: 4
+        pointBackgroundColor: balanceValues.map(balanceColor),
+        pointBorderColor: balanceValues.map((v, i) => (isCur(i) ? "#fff" : balanceColor(v))),
+        pointBorderWidth: balanceValues.map((_, i) => (isCur(i) ? 3 : 1)),
+        pointRadius: balanceValues.map((_, i) => (isCur(i) ? 8 : 4)),
+        pointHoverRadius: balanceValues.map((_, i) => (isCur(i) ? 10 : 6))
       }]
     },
-    options: { plugins: { legend: { display: false } } }
+    options: {
+      layout: { padding: { top: 34, right: 12 } },
+      plugins: {
+        legend: { display: false },
+        currentPoint: { index: balanceIdx, color: balanceIdx >= 0 ? balanceColor(balanceValues[balanceIdx]) : "#7c3aed" }
+      }
+    },
+    plugins: [currentPointPlugin]
   });
 
   // Classement des postes occasionnels par coût total cumulé sur les mois passés + en cours
