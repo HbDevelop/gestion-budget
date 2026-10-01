@@ -179,6 +179,13 @@ function receivedOf(v) {
   if (typeof v.received === "number") return v.received;
   return v.paid ? (v.amount || 0) : 0;
 }
+// Part de l'encaissé reçue en espèces (`receivedCash`) : elle n'arrive pas sur le compte,
+// mais c'est de l'argent disponible. Le reste de `received` est du virement.
+function cashOf(v) {
+  if (!v || typeof v.receivedCash !== "number") return 0;
+  return Math.min(v.receivedCash, receivedOf(v));
+}
+function virementOf(v) { return Math.max(0, receivedOf(v) - cashOf(v)); }
 // Somme de tous les soldes bancaires du mois, quelle que soit la clé — y compris d'anciens
 // seaux orphelins (ex. "commun") pas encore réaffectés à une personne.
 function sumBankBalances(data) {
@@ -212,6 +219,7 @@ function computeTotals(cat, data, scope = "famille") {
   let totalIncome = 0;
   let epargneIn = 0;          // "Virement de l'épargne" : reprise sur la réserve, pas un vrai revenu
   let revenusAVenir = 0;      // revenus du mois pas encore cochés "reçu"
+  let especesRecues = 0;      // revenus déjà encaissés en espèces (hors compte bancaire)
   const byGroup = { regulieres: 0, occasionnelles: 0, capital: 0 };
   let chargesAVenir = 0;      // charges réelles (régulières/occasionnelles) pas encore payées
   let capitalAVenir = 0;      // épargne/investissement du mois pas encore fait(e)
@@ -223,6 +231,7 @@ function computeTotals(cat, data, scope = "famille") {
       totalIncome += amount;
       if (item.role === "epargne_out") epargneIn += amount;
       revenusAVenir += Math.max(0, amount - receivedOf(v));
+      especesRecues += cashOf(v);
     } else {
       byGroup[item.type] = (byGroup[item.type] || 0) + amount;
       if (isShared(item)) {
@@ -257,11 +266,13 @@ function computeTotals(cat, data, scope = "famille") {
   // quand même le compte courant, donc on la déduit toujours ici (sinon on risque de la
   // "dépenser" par erreur) — seul l'affichage "Charges à venir" la distingue des vraies factures.
   const aVenirTotal = chargesAVenir + capitalAVenir;
-  const resteAVivreReel = bankBalance - aVenirTotal;
+  // Les espèces reçues ne sont pas sur le compte mais sont disponibles : on les ajoute au solde.
+  const disponible = bankBalance + especesRecues;
+  const resteAVivreReel = disponible - aVenirTotal;
   // Solde projeté fin de mois : + les revenus encore à encaisser. Chiffre stable qui ne
   // saute pas selon la date à laquelle le salaire (ou les versements de l'Etude) tombent.
-  const soldeProjete = bankBalance + revenusAVenir - aVenirTotal;
-  return { totalIncome, revenusReels, epargneIn, revenusAVenir, byGroup, totalExpenses, depensesReelles, balance, chargesAVenir, capitalAVenir, resteAVivreReel, soldeProjete, bankBalance };
+  const soldeProjete = disponible + revenusAVenir - aVenirTotal;
+  return { totalIncome, revenusReels, epargneIn, revenusAVenir, especesRecues, byGroup, totalExpenses, depensesReelles, balance, chargesAVenir, capitalAVenir, resteAVivreReel, soldeProjete, bankBalance };
 }
 
 // ---- State ----
@@ -300,6 +311,7 @@ const totalCapitalEl = $("#total-capital");
 const balanceEl = $("#balance");
 const daysLeftEl = $("#days-left");
 const bankBalanceEl = $("#bank-balance");
+const especesRecuesEl = $("#especes-recues");
 const revenusAVenirEl = $("#revenus-a-venir");
 const chargesAVenirEl = $("#charges-a-venir");
 const capitalAVenirEl = $("#capital-a-venir");
@@ -600,18 +612,23 @@ function buildIncomeRow(item) {
     `<span class="label-text">${escapeHtml(item.label)}${reserveTagHtml(item)}</span>` +
     `<input type="number" class="amount-input" value="${v0.amount}" step="0.01" />`;
 
+  // L'encaissé est réparti entre virement (arrive sur le compte) et espèces (en main).
   const recu = el("div", "income-recu" + (full0 ? " done" : ""));
   recu.innerHTML =
-    `<span class="recu-lbl">encaissé</span>` +
-    `<input type="number" class="recu-input" value="${rec0}" step="0.01" aria-label="Montant déjà encaissé" />` +
-    `<span class="recu-of">sur <b>${euros(v0.amount)}</b></span>` +
+    `<span class="recu-lbl">virement</span>` +
+    `<input type="number" class="recu-input recu-vir" value="${virementOf(v0)}" step="0.01" aria-label="Montant encaissé par virement" />` +
+    `<span class="recu-lbl">espèces</span>` +
+    `<input type="number" class="recu-input recu-cash" value="${cashOf(v0)}" step="0.01" aria-label="Montant encaissé en espèces" />` +
+    `<span class="recu-of">= <b class="recu-total">${euros(rec0)}</b> sur <b class="recu-amt">${euros(v0.amount)}</b></span>` +
     `<span class="recu-bar"><i style="width:${pct(v0.amount, rec0)}%"></i></span>`;
   block.append(row, recu);
 
   const amountInput = row.querySelector(".amount-input");
   const paidCheck = row.querySelector(".paid-check");
-  const recuInput = recu.querySelector(".recu-input");
-  const recuOfEl = recu.querySelector(".recu-of b");
+  const virInput = recu.querySelector(".recu-vir");
+  const cashInput = recu.querySelector(".recu-cash");
+  const recuTotalEl = recu.querySelector(".recu-total");
+  const recuOfEl = recu.querySelector(".recu-amt");
   const bar = recu.querySelector(".recu-bar i");
 
   // Applique la valeur, resynchronise l'affichage (barre, "sur X", case, total), sauvegarde.
@@ -621,12 +638,20 @@ function buildIncomeRow(item) {
     const rec = receivedOf(next);
     const full = amt > 0 && rec >= amt;
     recuOfEl.textContent = euros(amt);
+    recuTotalEl.textContent = euros(rec);
     bar.style.width = pct(amt, rec) + "%";
     recu.classList.toggle("done", full);
     paidCheck.checked = full;
-    if (document.activeElement !== recuInput) recuInput.value = rec;
+    if (document.activeElement !== virInput) virInput.value = virementOf(next);
+    if (document.activeElement !== cashInput) cashInput.value = cashOf(next);
     renderTotals();
     scheduleSave();
+  };
+  // Nouvelle répartition virement + espèces → total encaissé (`received`) + part cash.
+  const commitSplit = (vir, cash) => {
+    const c = current();
+    const rec = vir + cash;
+    commit({ ...c, received: rec, receivedCash: cash, paid: (c.amount || 0) > 0 && rec >= (c.amount || 0) });
   };
 
   amountInput.addEventListener("input", () => {
@@ -634,15 +659,18 @@ function buildIncomeRow(item) {
     const amt = parseFloat(amountInput.value) || 0;
     commit({ ...c, amount: amt, paid: amt > 0 && receivedOf(c) >= amt });
   });
-  recuInput.addEventListener("input", () => {
-    const c = current();
-    const rec = parseFloat(recuInput.value) || 0;
-    commit({ ...c, received: rec, paid: (c.amount || 0) > 0 && rec >= (c.amount || 0) });
+  virInput.addEventListener("input", () => {
+    commitSplit(parseFloat(virInput.value) || 0, cashOf(current()));
   });
+  cashInput.addEventListener("input", () => {
+    commitSplit(virementOf(current()), parseFloat(cashInput.value) || 0);
+  });
+  // Case "tout reçu" : complète par virement en gardant la part déjà reçue en espèces.
   paidCheck.addEventListener("change", () => {
     const c = current();
     const amt = c.amount || 0;
-    commit({ ...c, received: paidCheck.checked ? amt : 0, paid: paidCheck.checked });
+    const cash = paidCheck.checked ? Math.min(cashOf(c), amt) : 0;
+    commit({ ...c, received: paidCheck.checked ? amt : 0, receivedCash: cash, paid: paidCheck.checked });
   });
 
   return block;
@@ -748,6 +776,7 @@ function buildFamilleRow(item) {
     amountHtml = !done && rec > 0
       ? `<span class="fam-recu">${euros(rec)} /</span> ${euros(v.amount)}`
       : euros(v.amount);
+    if (cashOf(v) > 0) amountHtml = `<span class="fam-recu">dont ${euros(cashOf(v))} espèces ·</span> ` + amountHtml;
   }
   div.innerHTML =
     `<span class="paid-dot${done ? " on" : ""}" title="${dotTitle}"></span>` +
@@ -770,7 +799,7 @@ function renderTotals() {
   daysLeftEl.textContent = days;
 
   if (!monthData || !catalog) {
-    [totalIncomeEl, totalExpensesEl, totalCapitalEl, balanceEl, revenusAVenirEl, chargesAVenirEl, capitalAVenirEl, resteAVivreEl, soldeProjeteEl, dailyAllocationEl, dailyAllocationReelleEl]
+    [totalIncomeEl, totalExpensesEl, totalCapitalEl, balanceEl, especesRecuesEl, revenusAVenirEl, chargesAVenirEl, capitalAVenirEl, resteAVivreEl, soldeProjeteEl, dailyAllocationEl, dailyAllocationReelleEl]
       .forEach((elm) => { if (elm) elm.textContent = euros(0); });
     return;
   }
@@ -784,6 +813,7 @@ function renderTotals() {
   if (totalCapitalEl) totalCapitalEl.textContent = euros(t.byGroup.capital);
   balanceEl.textContent = euros(t.balance);
   balanceEl.classList.toggle("negative", t.balance < 0);
+  if (especesRecuesEl) especesRecuesEl.textContent = euros(t.especesRecues);
   revenusAVenirEl.textContent = euros(t.revenusAVenir);
   chargesAVenirEl.textContent = euros(t.chargesAVenir);
   if (capitalAVenirEl) capitalAVenirEl.textContent = euros(t.capitalAVenir);
@@ -902,6 +932,8 @@ function famRealtimePanel(days) {
   balRow.appendChild(el("td", "fam-col", euros(famBank)));
   body.appendChild(balRow);
 
+  const famEspeces = OWNER_KEYS.reduce((s, k) => s + totals[k].especesRecues, 0);
+  body.appendChild(famRtRow("Espèces reçues", OWNER_KEYS.map((k) => totals[k].especesRecues), famEspeces));
   body.appendChild(famRtRow("Revenus à venir", OWNER_KEYS.map((k) => totals[k].revenusAVenir), famRevenus));
   body.appendChild(famRtRow("Charges à venir", OWNER_KEYS.map((k) => totals[k].chargesAVenir), famUpcoming));
   body.appendChild(famRtRow("Épargne/Invest. prévu(e)", OWNER_KEYS.map((k) => totals[k].capitalAVenir), famCapitalAVenir));
@@ -1142,7 +1174,8 @@ async function setForecastValue(targetMonthId, itemId, value, monthsByI) {
     monthsByI[targetMonthId] = data;
   }
   const prev = data.values[itemId] || { amount: 0, paid: false };
-  data.values[itemId] = { amount: value, paid: prev.paid };
+  // {...prev} : garde l'encaissé (virement/espèces) et les champs de dépense partagée.
+  data.values[itemId] = { ...prev, amount: value };
   await persistMonth(targetMonthId, { ...data, updatedAt: new Date().toISOString(), updatedBy: currentUser.email });
   // Mois vierge qu'on vient de matérialiser (valeurs héritées du mois précédent) : on
   // ré-affiche une fois pour montrer ces valeurs. Sinon, on met juste à jour les totaux
