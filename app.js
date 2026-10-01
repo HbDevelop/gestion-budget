@@ -1399,13 +1399,30 @@ function monthAbbr(id) {
 
 // Niveaux d'autonomie (repères usuels d'une épargne de précaution), du plus bas au plus haut.
 const COUVERTURE_NIVEAUX = [
-  { min: 0, label: "Fragile", range: "moins de 3 mois", cls: "niveau-bas" },
-  { min: 3, label: "Correct", range: "3 à 6 mois", cls: "niveau-moyen" },
-  { min: 6, label: "Confortable", range: "6 mois et plus", cls: "niveau-haut" }
+  { min: 0, label: "Fragile", range: "moins de 3 mois", cls: "niveau-bas", color: "#dc2626" },
+  { min: 3, label: "Correct", range: "3 à 6 mois", cls: "niveau-moyen", color: "#d97706" },
+  { min: 6, label: "Confortable", range: "6 mois et plus", cls: "niveau-haut", color: "#059669" }
 ];
+function niveauOf(months) { return COUVERTURE_NIVEAUX.filter((n) => months >= n.min).pop(); }
 
-function renderCouverture(container, scope, c, curId) {
-  const niveau = COUVERTURE_NIVEAUX.filter((n) => c.months >= n.min).pop();
+// Changements de palier prévus : pour chaque mois futur de la courbe d'épargne, on recalcule
+// l'autonomie avec l'épargne prévue ce mois-là (et les dépenses prévues des mois qui suivent),
+// et on garde les mois où le niveau change (montée ou descente).
+function paliersPrevus(scope, series, monthsById, curId, niveauActuel) {
+  const out = [];
+  let prev = niveauActuel;
+  series.ids.forEach((id, i) => {
+    if (id <= curId) return;
+    const months = epargneCouverture(scope, series.values[i], monthsById, id).months;
+    const n = niveauOf(months);
+    if (n !== prev) out.push({ id, index: i, niveau: n, months, up: n.min > prev.min });
+    prev = n;
+  });
+  return out;
+}
+
+function renderCouverture(container, scope, c, curId, paliers = [], lastPrevuId = null) {
+  const niveau = niveauOf(c.months);
   const badge = niveau.label;
   container.className = "card couverture-card " + niveau.cls;
   const legendHtml = COUVERTURE_NIVEAUX.map((n) =>
@@ -1443,6 +1460,20 @@ function renderCouverture(container, scope, c, curId) {
   const beyond = c.months > 12 ? `<p class="cv-more">+ ${c.capped ? "plus de " : ""}${Math.floor(c.months - 12)} mois au-delà</p>` : "";
   const people = scope === "famille" ? `<small>${OWNER_KEYS.length} × ${POCKET_MONEY} €</small>` : "";
 
+  // Parcours prévu : niveau actuel → chaque changement de palier, avec le mois où il arrive.
+  const step = (n, when) => `<span class="cv-step ${n.cls}"><i></i><b>${n.label}</b> <small>${when}</small></span>`;
+  let pathHtml = "";
+  if (paliers.length) {
+    pathHtml = `<div class="cv-path"><span class="cv-path-lbl">Prévision</span>` +
+      step(niveau, "aujourd'hui") +
+      paliers.map((p) => `<span class="cv-arrow">${p.up ? "↗" : "↘"}</span>` +
+        step(p.niveau, `dès ${monthLabel(p.id)} · ${p.months.toLocaleString("fr-FR", { maximumFractionDigits: 1 })} mois`)).join("") +
+      `</div>`;
+  } else if (lastPrevuId) {
+    pathHtml = `<div class="cv-path"><span class="cv-path-lbl">Prévision</span>` +
+      `<span class="cv-path-flat">Reste <b class="${niveau.cls}">${niveau.label}</b> jusqu'à ${monthLabel(lastPrevuId)} (dernier mois prévu)</span></div>`;
+  }
+
   // Carte en bandeau sous la courbe : chiffre clé à gauche, frise + détail à droite.
   container.innerHTML = `
     <div class="cv-main">
@@ -1454,6 +1485,7 @@ function renderCouverture(container, scope, c, curId) {
     <div class="cv-side">
       <div class="cv-months" aria-label="Mois couverts sur les 12 prochains mois">${cellsHtml}</div>
       ${beyond}
+      ${pathHtml}
       <dl class="cv-facts">
         <div><dt>Épargne actuelle</dt><dd>${euros(c.savings)}</dd></div>
         <div><dt>Besoin moyen / mois</dt><dd>${euros(c.avgCost)}</dd></div>
@@ -1466,7 +1498,8 @@ function renderCouverture(container, scope, c, curId) {
 // Courbe cumulée (épargne / investissement) avec le point du mois en cours mis en valeur :
 // point agrandi + étiquette permanente "<mois> : <valeur>" au-dessus, pour repérer d'un coup
 // d'œil où on en est au milieu des mois passés et des mois prévus.
-function cumulLineChart(canvas, { ids, labels, values }, label, color) {
+// `marks` (optionnel) : repères verticaux [{ index, label, color }] (changements de palier).
+function cumulLineChart(canvas, { ids, labels, values }, label, color, marks = []) {
   const idx = ids.indexOf(monthId(new Date()));
   const at = (special, normal) => values.map((_, i) => (i === idx ? special : normal));
   return new Chart(canvas, {
@@ -1484,11 +1517,54 @@ function cumulLineChart(canvas, { ids, labels, values }, label, color) {
     },
     options: {
       layout: { padding: { top: 34, right: 12 } },
-      plugins: { legend: { display: false }, currentPoint: { index: idx, color } }
+      plugins: { legend: { display: false }, currentPoint: { index: idx, color }, levelMarks: { marks } }
     },
-    plugins: [currentPointPlugin]
+    plugins: [levelMarksPlugin, currentPointPlugin]
   });
 }
+
+// Plugin Chart.js local : ligne verticale pointillée + étiquette en haut du graphe pour chaque
+// repère (ex. passage de l'épargne au palier "Correct"). Dessiné avant l'étiquette du mois en cours.
+const levelMarksPlugin = {
+  id: "levelMarks",
+  afterDatasetsDraw(chart, _args, opts) {
+    const marks = (opts && opts.marks) || [];
+    if (!marks.length) return;
+    const { ctx, chartArea } = chart;
+    const meta = chart.getDatasetMeta(0);
+    ctx.save();
+    ctx.font = "600 11px system-ui, sans-serif";
+    marks.forEach((m) => {
+      const point = meta.data[m.index];
+      if (!point) return;
+      ctx.strokeStyle = m.color;
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([4, 4]);
+      ctx.beginPath();
+      ctx.moveTo(point.x, chartArea.top + 18);
+      ctx.lineTo(point.x, chartArea.bottom);
+      ctx.stroke();
+      ctx.setLineDash([]);
+      const text = m.label;
+      const w = ctx.measureText(text).width + 12;
+      const x = Math.min(Math.max(point.x - w / 2, chartArea.left), chartArea.right - w);
+      ctx.fillStyle = "#fff";
+      ctx.strokeStyle = m.color;
+      ctx.beginPath();
+      ctx.roundRect(x, chartArea.top, w, 18, 9);
+      ctx.fill();
+      ctx.stroke();
+      ctx.fillStyle = m.color;
+      ctx.textBaseline = "middle";
+      ctx.fillText(text, x + 6, chartArea.top + 9);
+      ctx.beginPath();
+      ctx.arc(point.x, point.y, 6, 0, Math.PI * 2);
+      ctx.lineWidth = 2;
+      ctx.stroke();
+    });
+    ctx.restore();
+  }
+};
 
 // Plugin Chart.js local : dessine l'étiquette du point d'index `options.index` (si présent).
 const currentPointPlugin = {
@@ -1570,15 +1646,19 @@ async function renderAnalyse() {
   const epargneSeries = reserveCumulSeries(currentScope, months, settings, {
     baseKey: "epargneBase", startKey: "epargneStart", role: "epargne", outRole: "epargne_out"
   });
-  charts.line = cumulLineChart($("#chart-line"), epargneSeries, "Épargne cumulée", "#2563eb");
-
   // Autonomie : épargne cumulée au mois en cours (ou dernier mois connu avant), confrontée
-  // aux dépenses prévues des mois suivants pour l'espace affiché.
+  // aux dépenses prévues des mois suivants pour l'espace affiché. Puis les changements de
+  // palier prévus d'après l'épargne prévue des mois suivants (carte + repères sur la courbe).
   const curId = monthId(new Date());
   let savingsNow = 0;
   epargneSeries.ids.forEach((id, i) => { if (id <= curId) savingsNow = epargneSeries.values[i]; });
   const monthsById = Object.fromEntries(months.map((m) => [m.id, m.data]));
-  renderCouverture($("#epargne-couverture"), currentScope, epargneCouverture(currentScope, savingsNow, monthsById, curId), curId);
+  const couverture = epargneCouverture(currentScope, savingsNow, monthsById, curId);
+  const paliers = paliersPrevus(currentScope, epargneSeries, monthsById, curId, niveauOf(couverture.months));
+  const lastPrevuId = epargneSeries.ids.filter((id) => id > curId).pop() || null;
+  renderCouverture($("#epargne-couverture"), currentScope, couverture, curId, paliers, lastPrevuId);
+  charts.line = cumulLineChart($("#chart-line"), epargneSeries, "Épargne cumulée", "#2563eb",
+    paliers.map((p) => ({ index: p.index, label: `${p.up ? "↗" : "↘"} ${p.niveau.label}`, color: p.niveau.color })));
 
   // Investissement cumulé = solde de départ (à partir du mois configuré) + somme glissante
   // du poste Investissement, sans soustraction (pas de "retrait d'investissement" suivi).
