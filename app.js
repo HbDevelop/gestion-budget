@@ -1322,6 +1322,37 @@ function pieOptions(dataset) {
   };
 }
 
+// Anneau avec deux lignes au centre (ex. "Revenus" / "5 300 €") : on reconnaît le graphe à sa
+// forme et à son centre sans avoir à lire le titre de la carte.
+function ringOptions(dataset, title, value, color) {
+  const opts = pieOptions(dataset);
+  opts.cutout = "62%";
+  opts.plugins.centerText = { title, value, color };
+  return opts;
+}
+
+const centerTextPlugin = {
+  id: "centerText",
+  afterDatasetsDraw(chart, _args, opts) {
+    if (!opts || !opts.title) return;
+    const arc = chart.getDatasetMeta(0).data[0];
+    if (!arc) return;
+    const { ctx } = chart;
+    ctx.save();
+    ctx.textAlign = "center";
+    ctx.textBaseline = "middle";
+    ctx.fillStyle = opts.color;
+    ctx.font = "600 12px system-ui, sans-serif";
+    ctx.fillText(opts.title, arc.x, arc.y - (opts.value ? 10 : 0));
+    if (opts.value) {
+      ctx.fillStyle = "#1c2331";
+      ctx.font = "700 16px system-ui, sans-serif";
+      ctx.fillText(opts.value, arc.x, arc.y + 10);
+    }
+    ctx.restore();
+  }
+};
+
 // Série cumulée d'un poste de "réserve" (épargne ou investissement). Pour l'espace "Famille",
 // on calcule la série de CHAQUE personne séparément (base de départ + 1er mois suivi propres à
 // chacune), puis on additionne mois par mois — impossible de sommer les réglages dans une
@@ -1600,7 +1631,8 @@ const currentPointPlugin = {
 };
 
 async function renderAnalyse() {
-  analyseMonthLabel.textContent = monthLabel(currentMonthId) + " (" + (currentScope === "famille" ? "Famille" : OWNER_LABEL[currentScope]) + ")";
+  // Juste le mois (titre "Ce mois-ci · octobre 2026") : l'espace est déjà indiqué par la barre d'espace.
+  analyseMonthLabel.textContent = monthLabel(currentMonthId);
   analyseFamilleCards.forEach((card) => card.classList.toggle("hidden", currentScope !== "famille"));
   // Toujours relire Firestore (plutôt que de réutiliser monthData) : un montant modifié
   // depuis Prévisions ne met pas à jour l'état en mémoire de l'écran Suivi.
@@ -1631,10 +1663,13 @@ async function renderAnalyse() {
     });
     for (let i = 0; i < avgData.length; i++) avgData[i] /= pastMonths.length;
   }
+  // Moyenne en anneau (et pas en camembert plein comme "Ce mois-ci") : les deux se distinguent
+  // au premier coup d'œil.
   charts.pieAvg = new Chart($("#chart-pie-avg"), {
-    type: "pie",
+    type: "doughnut",
     data: { labels: PIE_LABELS, datasets: [{ data: avgData, backgroundColor: PIE_COLORS }] },
-    options: pieOptions(avgData)
+    options: ringOptions(avgData, "Moyenne", `${pastMonths.length} mois`, "#6b7280"),
+    plugins: [centerTextPlugin]
   });
 
   // Épargne cumulée = solde de départ + somme glissante de (Épargne du mois - Virement de
@@ -1742,17 +1777,22 @@ async function renderAnalyse() {
     const peopleLabels = people.map((k) => OWNER_LABEL[k]);
 
     const incNow = people.map((k) => ownerKindSum(data, k, "income"));
+    // Centre de l'anneau = type + total (vert pour les entrées, rouge pour les sorties) : sinon
+    // les deux anneaux Habib/Marwa se ressemblent trait pour trait.
+    const sum = (arr) => arr.reduce((s, v) => s + v, 0);
     charts.famIncome = new Chart($("#chart-fam-income"), {
       type: "doughnut",
       data: { labels: peopleLabels, datasets: [{ data: incNow, backgroundColor: colors }] },
-      options: pieOptions(incNow)
+      options: ringOptions(incNow, "Revenus", euros(sum(incNow)), "#059669"),
+      plugins: [centerTextPlugin]
     });
 
     const expNow = people.map((k) => ownerKindSum(data, k, "expense"));
     charts.famSplit = new Chart($("#chart-fam-split"), {
       type: "doughnut",
       data: { labels: peopleLabels, datasets: [{ data: expNow, backgroundColor: colors }] },
-      options: pieOptions(expNow)
+      options: ringOptions(expNow, "Dépenses", euros(sum(expNow)), "#dc2626"),
+      plugins: [centerTextPlugin]
     });
 
     charts.famStack = new Chart($("#chart-fam-stack"), {
