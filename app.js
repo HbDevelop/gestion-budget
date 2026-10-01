@@ -195,6 +195,16 @@ function bankFor(data, scope) {
   if (scope === "famille") return sumBankBalances(data);
   return bankBalancesOf(data)[scope] || 0;
 }
+// Solde espèces (argent liquide en main), saisi à la main comme le solde bancaire :
+// format { habib, marwa }. Il s'ajoute au solde bancaire dans l'argent disponible.
+function cashBalancesOf(data) {
+  return (data && data.cashBalances && typeof data.cashBalances === "object") ? data.cashBalances : {};
+}
+function cashFor(data, scope) {
+  const all = cashBalancesOf(data);
+  if (scope === "famille") return Object.values(all).reduce((s, v) => s + (typeof v === "number" ? v : 0), 0);
+  return all[scope] || 0;
+}
 
 // Somme des postes d'un espace (revenus ou dépenses) pour un mois donné.
 // `kind` vaut "income" ou "expense". Sert à la ventilation et aux graphes consolidés.
@@ -266,13 +276,16 @@ function computeTotals(cat, data, scope = "famille") {
   // quand même le compte courant, donc on la déduit toujours ici (sinon on risque de la
   // "dépenser" par erreur) — seul l'affichage "Charges à venir" la distingue des vraies factures.
   const aVenirTotal = chargesAVenir + capitalAVenir;
-  // Les espèces reçues ne sont pas sur le compte mais sont disponibles : on les ajoute au solde.
-  const disponible = bankBalance + especesRecues;
+  // Argent disponible = compte + espèces en main (solde espèces saisi à la main, qui tient
+  // compte du liquide déjà dépensé). `especesRecues` reste affiché pour info seulement :
+  // l'ajouter en plus compterait deux fois le liquide déjà inclus dans le solde espèces.
+  const cashBalance = cashFor(data, scope);
+  const disponible = bankBalance + cashBalance;
   const resteAVivreReel = disponible - aVenirTotal;
   // Solde projeté fin de mois : + les revenus encore à encaisser. Chiffre stable qui ne
   // saute pas selon la date à laquelle le salaire (ou les versements de l'Etude) tombent.
   const soldeProjete = disponible + revenusAVenir - aVenirTotal;
-  return { totalIncome, revenusReels, epargneIn, revenusAVenir, especesRecues, byGroup, totalExpenses, depensesReelles, balance, chargesAVenir, capitalAVenir, resteAVivreReel, soldeProjete, bankBalance };
+  return { totalIncome, revenusReels, epargneIn, revenusAVenir, especesRecues, byGroup, totalExpenses, depensesReelles, balance, chargesAVenir, capitalAVenir, resteAVivreReel, soldeProjete, bankBalance, cashBalance };
 }
 
 // ---- State ----
@@ -311,6 +324,7 @@ const totalCapitalEl = $("#total-capital");
 const balanceEl = $("#balance");
 const daysLeftEl = $("#days-left");
 const bankBalanceEl = $("#bank-balance");
+const cashBalanceEl = $("#cash-balance");
 const especesRecuesEl = $("#especes-recues");
 const revenusAVenirEl = $("#revenus-a-venir");
 const chargesAVenirEl = $("#charges-a-venir");
@@ -573,12 +587,14 @@ function render() {
     groupsContainer.innerHTML = "";
     $("#income-card").classList.add("hidden");
     bankBalanceEl.value = "";
+    cashBalanceEl.value = "";
     renderTotals();
     return;
   }
   renderIncome();
   renderExpenseGroups();
   bankBalanceEl.value = bankFor(monthData, currentScope) || 0;
+  cashBalanceEl.value = cashFor(monthData, currentScope) || 0;
   renderTotals();
 }
 
@@ -794,6 +810,13 @@ bankBalanceEl.addEventListener("input", () => {
   scheduleSave();
 });
 
+cashBalanceEl.addEventListener("input", () => {
+  if (!monthData) return;
+  monthData.cashBalances = { ...cashBalancesOf(monthData), [currentScope]: parseFloat(cashBalanceEl.value) || 0 };
+  renderTotals();
+  scheduleSave();
+});
+
 function renderTotals() {
   const days = remainingDays(currentMonthId);
   daysLeftEl.textContent = days;
@@ -907,30 +930,15 @@ function famRealtimePanel(days) {
 
   const body = el("tbody");
 
-  // Ligne "Solde bancaire" : éditable, un compte par espace
-  const balRow = el("tr");
-  balRow.appendChild(el("td", null, "Solde bancaire"));
-  OWNER_KEYS.forEach((k) => {
-    const td = el("td");
-    const input = el("input", "fam-rt-input");
-    input.type = "number";
-    input.step = "0.01";
-    input.value = totals[k].bankBalance || 0;
-    input.setAttribute("aria-label", "Solde bancaire " + OWNER_LABEL[k]);
-    // "change" (et pas "input") : on ne reconstruit le tableau qu'à la validation du champ,
-    // pour ne pas perdre le focus à chaque frappe.
-    input.addEventListener("change", () => {
-      monthData.bankBalances = bankBalancesOf(monthData);
-      monthData.bankBalances[k] = parseFloat(input.value) || 0;
-      delete monthData.bankBalance;
-      scheduleSave();
-      renderFamilleSuivi();
-    });
-    td.appendChild(input);
-    balRow.appendChild(td);
-  });
-  balRow.appendChild(el("td", "fam-col", euros(famBank)));
-  body.appendChild(balRow);
+  // Lignes "Solde bancaire" et "Solde espèces" : éditables, une valeur par espace
+  body.appendChild(famRtInputRow("Solde bancaire", (k) => totals[k].bankBalance, famBank, (k, v) => {
+    monthData.bankBalances = bankBalancesOf(monthData);
+    monthData.bankBalances[k] = v;
+    delete monthData.bankBalance;
+  }));
+  body.appendChild(famRtInputRow("Solde espèces", (k) => totals[k].cashBalance, cashFor(monthData, "famille"), (k, v) => {
+    monthData.cashBalances = { ...cashBalancesOf(monthData), [k]: v };
+  }));
 
   const famEspeces = OWNER_KEYS.reduce((s, k) => s + totals[k].especesRecues, 0);
   body.appendChild(famRtRow("Espèces reçues", OWNER_KEYS.map((k) => totals[k].especesRecues), famEspeces));
@@ -945,6 +953,30 @@ function famRealtimePanel(days) {
   table.appendChild(body);
   card.appendChild(table);
   return card;
+}
+
+function famRtInputRow(label, valueOf, famValue, apply) {
+  const tr = el("tr");
+  tr.appendChild(el("td", null, label));
+  OWNER_KEYS.forEach((k) => {
+    const td = el("td");
+    const input = el("input", "fam-rt-input");
+    input.type = "number";
+    input.step = "0.01";
+    input.value = valueOf(k) || 0;
+    input.setAttribute("aria-label", label + " " + OWNER_LABEL[k]);
+    // "change" (et pas "input") : on ne reconstruit le tableau qu'à la validation du champ,
+    // pour ne pas perdre le focus à chaque frappe.
+    input.addEventListener("change", () => {
+      apply(k, parseFloat(input.value) || 0);
+      scheduleSave();
+      renderFamilleSuivi();
+    });
+    td.appendChild(input);
+    tr.appendChild(td);
+  });
+  tr.appendChild(el("td", "fam-col", euros(famValue)));
+  return tr;
 }
 
 function famRtRow(label, values, famValue, markNegative) {
