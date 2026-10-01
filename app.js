@@ -1400,13 +1400,21 @@ function renderCouverture(container, scope, c, curId) {
   const niveau = c.months >= 6 ? "" : c.months >= 3 ? "niveau-moyen" : "niveau-bas";
   const badge = c.months >= 6 ? "Confortable" : c.months >= 3 ? "Correct" : "Fragile";
   container.className = "card couverture-card" + (niveau ? " " + niveau : "");
-  const full = Math.floor(c.months + 1e-9);
   const big = c.capped ? "10 ans +" : c.months.toLocaleString("fr-FR", { maximumFractionDigits: 1 });
-  const until = c.savings <= 0
-    ? "Aucune épargne disponible ce mois-ci."
-    : full >= 1
-      ? `Couvert jusqu'à fin <b>${monthLabel(addMonths(curId, full))}</b>`
-      : "Moins d'un mois de dépenses couvert.";
+  // Date de fin = jour atteint dans le dernier mois (en partie) couvert, au prorata de la part
+  // couverte — cohérent avec la frise (ex. 1,9 mois → ~27 décembre, pas "fin novembre").
+  const last = c.cells[c.cells.length - 1];
+  let until;
+  if (c.savings <= 0 || !last) until = "Aucune épargne disponible ce mois-ci.";
+  else if (c.capped) until = "Plus de 10 ans de dépenses couvertes.";
+  else {
+    const dim = daysInMonth(last.id);
+    const day = Math.max(1, Math.floor(last.fill * dim));
+    const [y, m] = last.id.split("-").map(Number);
+    until = day >= dim
+      ? `Couvert jusqu'à fin <b>${monthLabel(last.id)}</b>`
+      : `Couvert jusqu'au <b>${new Date(y, m - 1, day).toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })}</b>`;
+  }
 
   // Frise des 12 prochains mois : chaque case se remplit selon la part du mois couverte.
   let cellsHtml = "";
@@ -1415,7 +1423,9 @@ function renderCouverture(container, scope, c, curId) {
     const cell = c.cells[i - 1];
     const pct = cell ? Math.round(cell.fill * 100) : 0;
     const title = `${monthLabel(id)} — ${cell ? `${pct} % couvert (besoin ${euros(cell.cost)}${cell.prevu ? "" : ", estimé"})` : "non couvert"}`;
-    cellsHtml += `<div class="cv-month" title="${escapeAttr(title)}"><div class="cv-cell"><i style="width:${pct}%"></i></div><span>${monthInitial(id)}</span></div>`;
+    // Mois couvert en partie : remplissage plus clair, pour ne pas le confondre avec un mois plein.
+    const partial = cell && cell.fill < 1 ? " partial" : "";
+    cellsHtml += `<div class="cv-month${partial}" title="${escapeAttr(title)}"><div class="cv-cell"><i style="width:${pct}%"></i></div><span>${monthInitial(id)}</span></div>`;
   }
   const beyond = c.months > 12 ? `<p class="cv-more">+ ${c.capped ? "plus de " : ""}${Math.floor(c.months - 12)} mois au-delà</p>` : "";
   const people = scope === "famille" ? `<small>${OWNER_KEYS.length} × ${POCKET_MONEY} €</small>` : "";
