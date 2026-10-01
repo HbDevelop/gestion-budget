@@ -1391,15 +1391,25 @@ function epargneCouverture(scope, savings, monthsById, curId) {
   return { months, cells, savings, pocket, avgCost, capped: remaining > 0 };
 }
 
-function monthInitial(id) {
+// Mois abrégé sans point, lisible dans une case étroite : "nov", "déc", "janv", "févr"...
+function monthAbbr(id) {
   const [y, m] = id.split("-").map(Number);
-  return new Date(y, m - 1, 1).toLocaleDateString("fr-FR", { month: "narrow" });
+  return new Date(y, m - 1, 1).toLocaleDateString("fr-FR", { month: "short" }).replace(".", "");
 }
 
+// Niveaux d'autonomie (repères usuels d'une épargne de précaution), du plus bas au plus haut.
+const COUVERTURE_NIVEAUX = [
+  { min: 0, label: "Fragile", range: "moins de 3 mois", cls: "niveau-bas" },
+  { min: 3, label: "Correct", range: "3 à 6 mois", cls: "niveau-moyen" },
+  { min: 6, label: "Confortable", range: "6 mois et plus", cls: "niveau-haut" }
+];
+
 function renderCouverture(container, scope, c, curId) {
-  const niveau = c.months >= 6 ? "" : c.months >= 3 ? "niveau-moyen" : "niveau-bas";
-  const badge = c.months >= 6 ? "Confortable" : c.months >= 3 ? "Correct" : "Fragile";
-  container.className = "card couverture-card" + (niveau ? " " + niveau : "");
+  const niveau = COUVERTURE_NIVEAUX.filter((n) => c.months >= n.min).pop();
+  const badge = niveau.label;
+  container.className = "card couverture-card " + niveau.cls;
+  const legendHtml = COUVERTURE_NIVEAUX.map((n) =>
+    `<li class="${n.cls}${n === niveau ? " current" : ""}"><i></i><b>${n.label}</b> ${n.range}</li>`).join("");
   const big = c.capped ? "10 ans +" : c.months.toLocaleString("fr-FR", { maximumFractionDigits: 1 });
   // Date de fin = jour atteint dans le dernier mois (en partie) couvert, au prorata de la part
   // couverte — cohérent avec la frise (ex. 1,9 mois → ~27 décembre, pas "fin novembre").
@@ -1425,7 +1435,10 @@ function renderCouverture(container, scope, c, curId) {
     const title = `${monthLabel(id)} — ${cell ? `${pct} % couvert (besoin ${euros(cell.cost)}${cell.prevu ? "" : ", estimé"})` : "non couvert"}`;
     // Mois couvert en partie : remplissage plus clair, pour ne pas le confondre avec un mois plein.
     const partial = cell && cell.fill < 1 ? " partial" : "";
-    cellsHtml += `<div class="cv-month${partial}" title="${escapeAttr(title)}"><div class="cv-cell"><i style="width:${pct}%"></i></div><span>${monthInitial(id)}</span></div>`;
+    // Année affichée au-dessus du 1er mois de la frise et de chaque janvier.
+    const year = i === 1 || id.endsWith("-01") ? id.slice(0, 4) : "";
+    cellsHtml += `<div class="cv-month${partial}${year && i > 1 ? " new-year" : ""}" title="${escapeAttr(title)}">` +
+      `<em>${year}</em><div class="cv-cell"><i style="width:${pct}%"></i></div><span>${monthAbbr(id)}</span></div>`;
   }
   const beyond = c.months > 12 ? `<p class="cv-more">+ ${c.capped ? "plus de " : ""}${Math.floor(c.months - 12)} mois au-delà</p>` : "";
   const people = scope === "famille" ? `<small>${OWNER_KEYS.length} × ${POCKET_MONEY} €</small>` : "";
@@ -1436,6 +1449,7 @@ function renderCouverture(container, scope, c, curId) {
       <h3>Autonomie de l'épargne</h3>
       <div class="cv-hero"><span class="cv-big">${big}</span>${c.capped ? "" : '<span class="cv-unit">mois</span>'}<span class="cv-badge">${badge}</span></div>
       <p class="cv-until">${until}</p>
+      <ul class="cv-legend" aria-label="Niveaux d'autonomie">${legendHtml}</ul>
     </div>
     <div class="cv-side">
       <div class="cv-months" aria-label="Mois couverts sur les 12 prochains mois">${cellsHtml}</div>

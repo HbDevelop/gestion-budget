@@ -551,7 +551,27 @@ body {
 .cv-cell i { display: block; height: 100%; background: var(--cv); }
 .cv-month.partial .cv-cell { box-shadow: inset 0 0 0 1px var(--cv); }
 .cv-month.partial .cv-cell i { opacity: 0.45; }
-.cv-month span { font-size: 9px; color: var(--text-muted); text-transform: uppercase; }
+.cv-month span { font-size: 10px; color: var(--text-muted); white-space: nowrap; }
+/* Année au-dessus du 1er mois et de chaque janvier ; vide (mais réservée) sinon, pour aligner */
+.cv-month em {
+  align-self: flex-start;
+  min-height: 13px;
+  font-size: 10px;
+  font-style: normal;
+  font-weight: 600;
+  color: var(--text-muted);
+}
+@media (max-width: 480px) { .cv-month span { font-size: 8px; } }
+/* Légende des niveaux : le niveau actuel ressort, les autres restent discrets */
+.cv-legend { list-style: none; margin: 4px 0 0; padding: 0; display: grid; gap: 4px; font-size: 11px; color: var(--text-muted); }
+.cv-legend li { display: flex; align-items: center; gap: 6px; opacity: 0.65; }
+.cv-legend li i { flex: none; width: 8px; height: 8px; border-radius: 50%; background: var(--lc); }
+.cv-legend li b { color: var(--lc); font-weight: 600; }
+.cv-legend li.current { opacity: 1; color: var(--text); }
+.cv-legend li.current i { box-shadow: 0 0 0 3px color-mix(in srgb, var(--lc) 25%, transparent); }
+.cv-legend .niveau-bas { --lc: var(--danger); }
+.cv-legend .niveau-moyen { --lc: #d97706; }
+.cv-legend .niveau-haut { --lc: var(--success); }
 .cv-more { margin: -6px 0 0; font-size: 11px; color: var(--text-muted); text-align: right; }
 /* Trois chiffres côte à côte : libellé au-dessus, valeur en dessous */
 .cv-facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 0; }
