@@ -1600,7 +1600,8 @@ const currentPointPlugin = {
 };
 
 async function renderAnalyse() {
-  analyseMonthLabel.textContent = monthLabel(currentMonthId) + " (" + (currentScope === "famille" ? "Famille" : OWNER_LABEL[currentScope]) + ")";
+  // Juste le mois (titre "Ce mois-ci · octobre 2026") : l'espace est déjà indiqué par la barre d'espace.
+  analyseMonthLabel.textContent = monthLabel(currentMonthId);
   analyseFamilleCards.forEach((card) => card.classList.toggle("hidden", currentScope !== "famille"));
   // Toujours relire Firestore (plutôt que de réutiliser monthData) : un montant modifié
   // depuis Prévisions ne met pas à jour l'état en mémoire de l'écran Suivi.
