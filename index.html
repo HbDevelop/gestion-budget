@@ -185,32 +185,9 @@
       <main class="content">
         <h2 class="view-title">Analyse</h2>
 
-        <h3 class="analyse-section-title">Ce mois-ci — <span id="analyse-month-label"></span></h3>
+        <!-- Ordre par importance : épargne d'abord, puis le mois en cours, puis les tendances -->
+        <h3 class="analyse-section-title">Épargne et investissement</h3>
         <div class="charts-grid">
-          <section class="card chart-card famille-only hidden">
-            <h3>Contribution aux revenus du foyer</h3>
-            <canvas id="chart-fam-income"></canvas>
-          </section>
-          <section class="card chart-card famille-only hidden">
-            <h3>Dépenses du foyer par personne</h3>
-            <canvas id="chart-fam-split"></canvas>
-          </section>
-          <section class="card chart-card">
-            <h3>Répartition globale</h3>
-            <canvas id="chart-pie"></canvas>
-          </section>
-        </div>
-
-        <h3 class="analyse-section-title">Tendances sur la durée</h3>
-        <div class="charts-grid">
-          <section class="card chart-card">
-            <h3>Répartition globale moyenne (mois passés)</h3>
-            <canvas id="chart-pie-avg"></canvas>
-          </section>
-          <section class="card chart-card chart-wide famille-only hidden">
-            <h3>Dépenses par personne, mois par mois</h3>
-            <canvas id="chart-fam-stack"></canvas>
-          </section>
           <div class="chart-wide epargne-row">
             <section class="card chart-card">
               <h3>Évolution de l'épargne cumulée</h3>
@@ -222,6 +199,26 @@
             <h3>Évolution de l'investissement</h3>
             <canvas id="chart-investment"></canvas>
           </section>
+        </div>
+
+        <h3 class="analyse-section-title">Ce mois-ci — <span id="analyse-month-label"></span></h3>
+        <div class="charts-grid">
+          <section class="card chart-card">
+            <h3>Répartition globale</h3>
+            <canvas id="chart-pie"></canvas>
+          </section>
+          <section class="card chart-card famille-only hidden">
+            <h3>Contribution aux revenus du foyer</h3>
+            <canvas id="chart-fam-income"></canvas>
+          </section>
+          <section class="card chart-card famille-only hidden">
+            <h3>Dépenses du foyer par personne</h3>
+            <canvas id="chart-fam-split"></canvas>
+          </section>
+        </div>
+
+        <h3 class="analyse-section-title">Tendances sur la durée</h3>
+        <div class="charts-grid">
           <section class="card chart-card chart-wide">
             <h3>Reste à vivre mois par mois</h3>
             <canvas id="chart-balance"></canvas>
@@ -230,11 +227,19 @@
             <h3>Postes occasionnels les plus coûteux (mois passés + en cours)</h3>
             <canvas id="chart-occ-top"></canvas>
           </section>
+          <section class="card chart-card chart-wide famille-only hidden">
+            <h3>Dépenses par personne, mois par mois</h3>
+            <canvas id="chart-fam-stack"></canvas>
+          </section>
+          <section class="card chart-card">
+            <h3>Répartition globale moyenne (mois passés)</h3>
+            <canvas id="chart-pie-avg"></canvas>
+          </section>
         </div>
       </main>
     </div>
   </div>
 
-  <script type="module" src="app.js?v=48"></script>
+  <script type="module" src="app.js?v=49"></script>
 </body>
 </html>
