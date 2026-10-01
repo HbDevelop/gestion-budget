@@ -1360,6 +1360,80 @@ function reserveCumulSeries(scope, months, settings, { baseKey, startKey, role, 
   return { ids, labels, values };
 }
 
+// ---- Autonomie de l'épargne ----
+// Combien de mois l'épargne actuelle couvrirait si elle devait payer seule les mois suivants :
+// pour chaque mois à partir du mois prochain, besoin = dépenses réelles prévues (Prévisions,
+// hors épargne/investissement) de l'espace + argent de poche (par personne). Au-delà des mois
+// déjà prévus, on prend la moyenne des mois prévus.
+const POCKET_MONEY = 500;
+const COUVERTURE_MAX_MOIS = 120;
+
+function epargneCouverture(scope, savings, monthsById, curId) {
+  const pocket = POCKET_MONEY * (scope === "famille" ? OWNER_KEYS.length : 1);
+  const costOf = (id) => monthsById[id] ? computeTotals(catalog, monthsById[id], scope).depensesReelles + pocket : null;
+  const known = Object.keys(monthsById).filter((id) => id > curId).map(costOf);
+  const fallback = known.length
+    ? known.reduce((s, c) => s + c, 0) / known.length
+    : (costOf(curId) || pocket);
+  let remaining = Math.max(0, savings);
+  const cells = [];
+  let usedCost = 0;
+  for (let i = 1; i <= COUVERTURE_MAX_MOIS && remaining > 0; i++) {
+    const id = addMonths(curId, i);
+    const cost = costOf(id) ?? fallback;
+    const fill = Math.min(1, remaining / cost);
+    cells.push({ id, fill, cost, prevu: !!monthsById[id] });
+    usedCost += cost;
+    remaining -= cost;
+  }
+  const months = cells.reduce((s, c) => s + c.fill, 0);
+  const avgCost = cells.length ? usedCost / cells.length : fallback;
+  return { months, cells, savings, pocket, avgCost, capped: remaining > 0 };
+}
+
+function monthInitial(id) {
+  const [y, m] = id.split("-").map(Number);
+  return new Date(y, m - 1, 1).toLocaleDateString("fr-FR", { month: "narrow" });
+}
+
+function renderCouverture(container, scope, c, curId) {
+  const niveau = c.months >= 6 ? "" : c.months >= 3 ? "niveau-moyen" : "niveau-bas";
+  const badge = c.months >= 6 ? "Confortable" : c.months >= 3 ? "Correct" : "Fragile";
+  container.className = "card couverture-card" + (niveau ? " " + niveau : "");
+  const full = Math.floor(c.months + 1e-9);
+  const big = c.capped ? "10 ans +" : c.months.toLocaleString("fr-FR", { maximumFractionDigits: 1 });
+  const until = c.savings <= 0
+    ? "Aucune épargne disponible ce mois-ci."
+    : full >= 1
+      ? `Couvert jusqu'à fin <b>${monthLabel(addMonths(curId, full))}</b>`
+      : "Moins d'un mois de dépenses couvert.";
+
+  // Frise des 12 prochains mois : chaque case se remplit selon la part du mois couverte.
+  let cellsHtml = "";
+  for (let i = 1; i <= 12; i++) {
+    const id = addMonths(curId, i);
+    const cell = c.cells[i - 1];
+    const pct = cell ? Math.round(cell.fill * 100) : 0;
+    const title = `${monthLabel(id)} — ${cell ? `${pct} % couvert (besoin ${euros(cell.cost)}${cell.prevu ? "" : ", estimé"})` : "non couvert"}`;
+    cellsHtml += `<div class="cv-month" title="${escapeAttr(title)}"><div class="cv-cell"><i style="width:${pct}%"></i></div><span>${monthInitial(id)}</span></div>`;
+  }
+  const beyond = c.months > 12 ? `<p class="cv-more">+ ${c.capped ? "plus de " : ""}${Math.floor(c.months - 12)} mois au-delà</p>` : "";
+  const people = scope === "famille" ? ` <small>(${OWNER_KEYS.length} × ${POCKET_MONEY} €)</small>` : "";
+
+  container.innerHTML = `
+    <h3>Autonomie de l'épargne</h3>
+    <div class="cv-hero"><span class="cv-big">${big}</span>${c.capped ? "" : '<span class="cv-unit">mois</span>'}<span class="cv-badge">${badge}</span></div>
+    <p class="cv-until">${until}</p>
+    <div class="cv-months" aria-label="Mois couverts sur les 12 prochains mois">${cellsHtml}</div>
+    ${beyond}
+    <dl class="cv-facts">
+      <div><dt>Épargne actuelle</dt><dd>${euros(c.savings)}</dd></div>
+      <div><dt>Besoin moyen / mois</dt><dd>${euros(c.avgCost)}</dd></div>
+      <div><dt>dont poche${people}</dt><dd>${euros(c.pocket)}</dd></div>
+    </dl>
+    <p class="cv-note">Dépenses prévues des mois suivants (Prévisions, hors épargne et investissement) + argent de poche. Au-delà des mois prévus : moyenne des mois prévus.</p>`;
+}
+
 // Courbe cumulée (épargne / investissement) avec le point du mois en cours mis en valeur :
 // point agrandi + étiquette permanente "<mois> : <valeur>" au-dessus, pour repérer d'un coup
 // d'œil où on en est au milieu des mois passés et des mois prévus.
@@ -1468,6 +1542,14 @@ async function renderAnalyse() {
     baseKey: "epargneBase", startKey: "epargneStart", role: "epargne", outRole: "epargne_out"
   });
   charts.line = cumulLineChart($("#chart-line"), epargneSeries, "Épargne cumulée", "#2563eb");
+
+  // Autonomie : épargne cumulée au mois en cours (ou dernier mois connu avant), confrontée
+  // aux dépenses prévues des mois suivants pour l'espace affiché.
+  const curId = monthId(new Date());
+  let savingsNow = 0;
+  epargneSeries.ids.forEach((id, i) => { if (id <= curId) savingsNow = epargneSeries.values[i]; });
+  const monthsById = Object.fromEntries(months.map((m) => [m.id, m.data]));
+  renderCouverture($("#epargne-couverture"), currentScope, epargneCouverture(currentScope, savingsNow, monthsById, curId), curId);
 
   // Investissement cumulé = solde de départ (à partir du mois configuré) + somme glissante
   // du poste Investissement, sans soustraction (pas de "retrait d'investissement" suivi).
