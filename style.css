@@ -503,6 +503,58 @@ body {
 .chart-card { max-width: 100%; }
 .chart-card canvas { max-height: 320px; }
 
+/* Épargne cumulée + carte "autonomie" côte à côte (empilées sur mobile) */
+.epargne-row { display: grid; grid-template-columns: 1fr; gap: 16px; min-width: 0; }
+.epargne-row > .chart-card { min-width: 0; }
+@media (min-width: 900px) {
+  .epargne-row { grid-template-columns: minmax(0, 1fr) 250px; align-items: start; }
+}
+.couverture-card {
+  --cv: var(--success);
+  --cv-bg: #ecfdf5;
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  border-top: 4px solid var(--cv);
+}
+.couverture-card.niveau-moyen { --cv: #d97706; --cv-bg: #fffbeb; }
+.couverture-card.niveau-bas { --cv: var(--danger); --cv-bg: #fef2f2; }
+.couverture-card h3 { margin: 0; font-size: 15px; }
+.cv-badge {
+  font-size: 11px;
+  font-weight: 600;
+  padding: 3px 9px;
+  border-radius: 999px;
+  color: var(--cv);
+  background: var(--cv-bg);
+  white-space: nowrap;
+}
+.cv-hero { display: flex; align-items: baseline; gap: 6px; }
+.cv-hero .cv-badge { margin-left: auto; align-self: center; }
+.cv-big {
+  font-size: 44px;
+  line-height: 1;
+  font-weight: 700;
+  color: var(--cv);
+  font-variant-numeric: tabular-nums;
+  letter-spacing: -1px;
+}
+.cv-unit { font-size: 18px; font-weight: 600; color: var(--cv); }
+.cv-until { margin: -6px 0 0; font-size: 13px; color: var(--text-muted); }
+.cv-until b { color: var(--text); }
+.cv-months { display: grid; grid-template-columns: repeat(12, 1fr); gap: 3px; }
+.cv-month { display: flex; flex-direction: column; align-items: center; gap: 3px; min-width: 0; }
+.cv-cell { width: 100%; height: 22px; border-radius: 4px; background: var(--border); overflow: hidden; }
+.cv-cell i { display: block; height: 100%; background: var(--cv); }
+.cv-month span { font-size: 9px; color: var(--text-muted); text-transform: uppercase; }
+.cv-more { margin: -8px 0 0; font-size: 11px; color: var(--text-muted); text-align: right; }
+.cv-facts { display: grid; gap: 6px; margin: 0; padding: 12px 0 0; border-top: 1px solid var(--border); }
+.cv-facts div { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; }
+.cv-facts dt { color: var(--text-muted); }
+.cv-facts dt small { font-size: 11px; }
+.cv-facts dd { margin: 0; font-weight: 600; font-variant-numeric: tabular-nums; }
+.cv-note { margin: 0; font-size: 11px; color: var(--text-muted); line-height: 1.4; }
+
 /* ==================================================================
    Espaces budgétaires : sélecteur + vue consolidée "Famille"
    ================================================================== */
