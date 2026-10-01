@@ -569,9 +569,28 @@ body {
 .cv-legend li b { color: var(--lc); font-weight: 600; }
 .cv-legend li.current { opacity: 1; color: var(--text); }
 .cv-legend li.current i { box-shadow: 0 0 0 3px color-mix(in srgb, var(--lc) 25%, transparent); }
-.cv-legend .niveau-bas { --lc: var(--danger); }
-.cv-legend .niveau-moyen { --lc: #d97706; }
-.cv-legend .niveau-haut { --lc: var(--success); }
+.cv-legend .niveau-bas, .cv-path .niveau-bas { --lc: var(--danger); }
+.cv-legend .niveau-moyen, .cv-path .niveau-moyen { --lc: #d97706; }
+.cv-legend .niveau-haut, .cv-path .niveau-haut { --lc: var(--success); }
+/* Parcours prévu : niveau actuel ↗ prochains paliers, avec le mois où ils arrivent */
+.cv-path {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--bg);
+  font-size: 12px;
+}
+.cv-path-lbl { font-size: 10px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); margin-right: 2px; }
+.cv-step { display: inline-flex; align-items: center; gap: 5px; white-space: nowrap; }
+.cv-step i { width: 8px; height: 8px; border-radius: 50%; background: var(--lc); }
+.cv-step b { color: var(--lc); }
+.cv-step small { color: var(--text-muted); font-size: 11px; }
+.cv-arrow { color: var(--text-muted); }
+.cv-path-flat { color: var(--text-muted); }
+.cv-path-flat b { color: var(--lc); }
 .cv-more { margin: -6px 0 0; font-size: 11px; color: var(--text-muted); text-align: right; }
 /* Trois chiffres côte à côte : libellé au-dessus, valeur en dessous */
 .cv-facts { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 12px; margin: 0; }
