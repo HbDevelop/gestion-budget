@@ -201,18 +201,22 @@
           </section>
         </div>
 
-        <h3 class="analyse-section-title">Ce mois-ci — <span id="analyse-month-label"></span></h3>
+        <h3 class="analyse-section-title">Répartition du budget</h3>
         <div class="charts-grid">
           <section class="card chart-card">
-            <h3>Répartition globale</h3>
+            <h3>Ce mois-ci · <span id="analyse-month-label"></span></h3>
             <canvas id="chart-pie"></canvas>
           </section>
+          <section class="card chart-card">
+            <h3>Moyenne des mois passés</h3>
+            <canvas id="chart-pie-avg"></canvas>
+          </section>
           <section class="card chart-card famille-only hidden">
-            <h3>Contribution aux revenus du foyer</h3>
+            <h3>Revenus par personne (ce mois-ci)</h3>
             <canvas id="chart-fam-income"></canvas>
           </section>
           <section class="card chart-card famille-only hidden">
-            <h3>Dépenses du foyer par personne</h3>
+            <h3>Dépenses par personne (ce mois-ci)</h3>
             <canvas id="chart-fam-split"></canvas>
           </section>
         </div>
@@ -231,15 +235,11 @@
             <h3>Dépenses par personne, mois par mois</h3>
             <canvas id="chart-fam-stack"></canvas>
           </section>
-          <section class="card chart-card">
-            <h3>Répartition globale moyenne (mois passés)</h3>
-            <canvas id="chart-pie-avg"></canvas>
-          </section>
         </div>
       </main>
     </div>
   </div>
 
-  <script type="module" src="app.js?v=49"></script>
+  <script type="module" src="app.js?v=50"></script>
 </body>
 </html>
