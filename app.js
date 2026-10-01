@@ -1347,16 +1347,78 @@ function reserveCumulSeries(scope, months, settings, { baseKey, startKey, role, 
     });
     return byId;
   });
+  const ids = [];
   const labels = [];
   const values = [];
   months.forEach(({ id }) => {
     if (seriesByOwner.every((s) => s[id] != null)) {
+      ids.push(id);
       labels.push(monthLabelShort(id));
       values.push(seriesByOwner.reduce((sum, s) => sum + s[id], 0));
     }
   });
-  return { labels, values };
+  return { ids, labels, values };
 }
+
+// Courbe cumulée (épargne / investissement) avec le point du mois en cours mis en valeur :
+// point agrandi + étiquette permanente "<mois> : <valeur>" au-dessus, pour repérer d'un coup
+// d'œil où on en est au milieu des mois passés et des mois prévus.
+function cumulLineChart(canvas, { ids, labels, values }, label, color) {
+  const idx = ids.indexOf(monthId(new Date()));
+  const at = (special, normal) => values.map((_, i) => (i === idx ? special : normal));
+  return new Chart(canvas, {
+    type: "line",
+    data: {
+      labels,
+      datasets: [{
+        label, data: values, borderColor: color, tension: 0.3,
+        pointRadius: at(7, 3),
+        pointHoverRadius: at(9, 5),
+        pointBackgroundColor: at(color, "#fff"),
+        pointBorderColor: color,
+        pointBorderWidth: at(3, 1.5)
+      }]
+    },
+    options: {
+      layout: { padding: { top: 34, right: 12 } },
+      plugins: { legend: { display: false }, currentPoint: { index: idx, color } }
+    },
+    plugins: [currentPointPlugin]
+  });
+}
+
+// Plugin Chart.js local : dessine l'étiquette du point d'index `options.index` (si présent).
+const currentPointPlugin = {
+  id: "currentPoint",
+  afterDatasetsDraw(chart, _args, opts) {
+    if (opts.index == null || opts.index < 0) return;
+    const point = chart.getDatasetMeta(0).data[opts.index];
+    const value = chart.data.datasets[0].data[opts.index];
+    if (!point || value == null) return;
+    const { ctx, chartArea } = chart;
+    const text = `${chart.data.labels[opts.index]} : ${euros(value)}`;
+    ctx.save();
+    ctx.font = "600 12px system-ui, sans-serif";
+    const w = ctx.measureText(text).width + 14;
+    const h = 22;
+    // Bulle centrée au-dessus du point, gardée dans la zone du graphe.
+    const x = Math.min(Math.max(point.x - w / 2, chartArea.left), chartArea.right - w);
+    const y = point.y - h - 12;
+    ctx.fillStyle = opts.color;
+    ctx.beginPath();
+    ctx.roundRect(x, y, w, h, 6);
+    ctx.fill();
+    ctx.beginPath();
+    ctx.moveTo(point.x - 5, y + h);
+    ctx.lineTo(point.x + 5, y + h);
+    ctx.lineTo(point.x, y + h + 5);
+    ctx.fill();
+    ctx.fillStyle = "#fff";
+    ctx.textBaseline = "middle";
+    ctx.fillText(text, x + 7, y + h / 2);
+    ctx.restore();
+  }
+};
 
 async function renderAnalyse() {
   analyseMonthLabel.textContent = monthLabel(currentMonthId) + " (" + (currentScope === "famille" ? "Famille" : OWNER_LABEL[currentScope]) + ")";
@@ -1402,25 +1464,17 @@ async function renderAnalyse() {
   // investissementBase, investissementStart }, avec repli sur les réglages globaux
   // (rétro-compat). Pour "Famille", reserveCumulSeries somme Habib + Marwa proprement
   // (voir sa doc) au lieu de réutiliser un seul réglage global pour les deux.
-  const { labels, values } = reserveCumulSeries(currentScope, months, settings, {
+  const epargneSeries = reserveCumulSeries(currentScope, months, settings, {
     baseKey: "epargneBase", startKey: "epargneStart", role: "epargne", outRole: "epargne_out"
   });
-  charts.line = new Chart($("#chart-line"), {
-    type: "line",
-    data: { labels, datasets: [{ label: "Épargne cumulée", data: values, borderColor: "#2563eb", tension: 0.3 }] },
-    options: { plugins: { legend: { display: false } } }
-  });
+  charts.line = cumulLineChart($("#chart-line"), epargneSeries, "Épargne cumulée", "#2563eb");
 
   // Investissement cumulé = solde de départ (à partir du mois configuré) + somme glissante
   // du poste Investissement, sans soustraction (pas de "retrait d'investissement" suivi).
-  const { labels: invLabels, values: invValues } = reserveCumulSeries(currentScope, months, settings, {
+  const invSeries = reserveCumulSeries(currentScope, months, settings, {
     baseKey: "investissementBase", startKey: "investissementStart", role: "investissement", defaultStart: "2026-08"
   });
-  charts.investment = new Chart($("#chart-investment"), {
-    type: "line",
-    data: { labels: invLabels, datasets: [{ label: "Investissement cumulé", data: invValues, borderColor: "#059669", tension: 0.3 }] },
-    options: { plugins: { legend: { display: false } } }
-  });
+  charts.investment = cumulLineChart($("#chart-investment"), invSeries, "Investissement cumulé", "#059669");
 
   // Reste à vivre de chaque mois (pas cumulé) : la tendance mois après mois, avec les mois
   // en négatif mis en évidence pour repérer vite les périodes tendues. Juin 2026 est exclu :
