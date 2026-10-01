@@ -1399,19 +1399,27 @@ function reserveCumulSeries(scope, months, settings, { baseKey, startKey, role, 
 const POCKET_MONEY = 500;
 const COUVERTURE_MAX_MOIS = 120;
 
-function epargneCouverture(scope, savings, monthsById, curId) {
+// Besoin d'un mois donné vu depuis `fromId` : dépenses réelles prévues de l'espace + argent de
+// poche ; pour un mois sans prévision, moyenne des mois prévus après `fromId`. Partagé par
+// l'autonomie et l'objectif d'épargne pour qu'ils suivent exactement les mêmes règles.
+function besoinMensuel(scope, monthsById, fromId) {
   const pocket = POCKET_MONEY * (scope === "famille" ? OWNER_KEYS.length : 1);
   const costOf = (id) => monthsById[id] ? computeTotals(catalog, monthsById[id], scope).depensesReelles + pocket : null;
-  const known = Object.keys(monthsById).filter((id) => id > curId).map(costOf);
+  const known = Object.keys(monthsById).filter((id) => id > fromId).map(costOf);
   const fallback = known.length
     ? known.reduce((s, c) => s + c, 0) / known.length
-    : (costOf(curId) || pocket);
+    : (costOf(fromId) || pocket);
+  return { pocket, fallback, cost: (id) => costOf(id) ?? fallback };
+}
+
+function epargneCouverture(scope, savings, monthsById, curId) {
+  const { pocket, fallback, cost: costFor } = besoinMensuel(scope, monthsById, curId);
   let remaining = Math.max(0, savings);
   const cells = [];
   let usedCost = 0;
   for (let i = 1; i <= COUVERTURE_MAX_MOIS && remaining > 0; i++) {
     const id = addMonths(curId, i);
-    const cost = costOf(id) ?? fallback;
+    const cost = costFor(id);
     const fill = Math.min(1, remaining / cost);
     cells.push({ id, fill, cost, prevu: !!monthsById[id] });
     usedCost += cost;
@@ -1420,6 +1428,79 @@ function epargneCouverture(scope, savings, monthsById, curId) {
   const months = cells.reduce((s, c) => s + c.fill, 0);
   const avgCost = cells.length ? usedCost / cells.length : fallback;
   return { months, cells, savings, pocket, avgCost, capped: remaining > 0 };
+}
+
+// ---- Objectif d'épargne ----
+// "Atteindre <palier> d'ici <mois>" : épargne nécessaire à l'échéance = besoin des N mois qui
+// la suivent (N = 3 ou 6). On la compare à l'épargne prévue à cette date (courbe d'épargne) ;
+// l'écart, s'il y en a un, est réparti sur les mois d'ici l'échéance (mois prochain inclus).
+function monthsBetween(fromId, toId) {
+  const [y1, m1] = fromId.split("-").map(Number);
+  const [y2, m2] = toId.split("-").map(Number);
+  return (y2 - y1) * 12 + (m2 - m1);
+}
+
+function objectifEpargne(scope, series, monthsById, curId, cibleMois, targetId) {
+  const { cost } = besoinMensuel(scope, monthsById, targetId);
+  let required = 0;
+  for (let i = 1; i <= cibleMois; i++) required += cost(addMonths(targetId, i));
+  let projected = 0;
+  series.ids.forEach((id, i) => { if (id <= targetId) projected = series.values[i]; });
+  const nbMois = Math.max(1, monthsBetween(curId, targetId));
+  const gap = required - projected;
+  return { required, projected, gap, nbMois, perMonth: gap / nbMois };
+}
+
+function objectifKey(scope) { return "budget-objectif-" + scope; }
+
+// Bloc "Objectif" dans la carte autonomie : palier visé + échéance (mémorisés par espace dans
+// ce navigateur), et l'effort mensuel nécessaire. Ne relit rien dans Firestore au changement.
+function renderObjectif(box, scope, series, monthsById, curId, niveauActuel) {
+  const moisOptions = series.ids.filter((id) => id > curId).slice(0, 12);
+  if (!moisOptions.length) {
+    box.innerHTML = `<span class="cv-path-lbl">Objectif</span> <span class="cv-goal-empty">Ajoute des mois dans Prévisions pour fixer un objectif.</span>`;
+    return;
+  }
+  const cibles = COUVERTURE_NIVEAUX.filter((n) => n.min > 0);
+  let saved = {};
+  try { saved = JSON.parse(lsGet(objectifKey(scope)) || "{}") || {}; } catch (e) { saved = {}; }
+  const defaultCible = cibles.find((n) => n.min > niveauActuel.min) || cibles[cibles.length - 1];
+  let cible = cibles.find((n) => n.min === saved.min) || defaultCible;
+  let target = moisOptions.includes(saved.mois) ? saved.mois : moisOptions[moisOptions.length - 1];
+
+  box.innerHTML = `
+    <div class="cv-goal-head">
+      <span class="cv-path-lbl">Objectif</span>
+      <label>atteindre <select class="cv-goal-niveau" aria-label="Palier visé">${cibles.map((n) =>
+        `<option value="${n.min}">${n.label} (${n.min} mois)</option>`).join("")}</select></label>
+      <label>d'ici <select class="cv-goal-mois" aria-label="Échéance">${moisOptions.map((id) =>
+        `<option value="${id}">${monthLabel(id)}</option>`).join("")}</select></label>
+    </div>
+    <div class="cv-goal-res"></div>`;
+  const selNiveau = box.querySelector(".cv-goal-niveau");
+  const selMois = box.querySelector(".cv-goal-mois");
+  const res = box.querySelector(".cv-goal-res");
+  selNiveau.value = String(cible.min);
+  selMois.value = target;
+
+  const update = () => {
+    cible = cibles.find((n) => n.min === Number(selNiveau.value)) || defaultCible;
+    target = selMois.value;
+    lsSet(objectifKey(scope), JSON.stringify({ min: cible.min, mois: target }));
+    const o = objectifEpargne(scope, series, monthsById, curId, cible.min, target);
+    const quand = monthLabel(target);
+    box.className = "cv-goal " + (o.gap <= 0 ? "ok" : "effort");
+    res.innerHTML = o.gap <= 0
+      ? `<span class="cv-goal-big">✓ Atteint</span>
+         <span class="cv-goal-txt">avec l'épargne déjà prévue : <b>${euros(o.projected)}</b> en ${quand}
+         pour <b>${euros(o.required)}</b> nécessaires (marge ${euros(-o.gap)}).</span>`
+      : `<span class="cv-goal-big">+${euros(o.perMonth)}<small>/mois</small></span>
+         <span class="cv-goal-txt">à épargner <b>en plus</b> de ce qui est prévu, pendant ${o.nbMois} mois.
+         Il manque <b>${euros(o.gap)}</b> : ${euros(o.required)} nécessaires en ${quand}, ${euros(o.projected)} prévus.</span>`;
+  };
+  selNiveau.addEventListener("change", update);
+  selMois.addEventListener("change", update);
+  update();
 }
 
 // Mois abrégé sans point, lisible dans une case étroite : "nov", "déc", "janv", "févr"...
@@ -1517,6 +1598,7 @@ function renderCouverture(container, scope, c, curId, paliers = [], lastPrevuId 
       <div class="cv-months" aria-label="Mois couverts sur les 12 prochains mois">${cellsHtml}</div>
       ${beyond}
       ${pathHtml}
+      <div class="cv-goal"></div>
       <dl class="cv-facts">
         <div><dt>Épargne actuelle</dt><dd>${euros(c.savings)}</dd></div>
         <div><dt>Besoin moyen / mois</dt><dd>${euros(c.avgCost)}</dd></div>
@@ -1692,6 +1774,7 @@ async function renderAnalyse() {
   const paliers = paliersPrevus(currentScope, epargneSeries, monthsById, curId, niveauOf(couverture.months));
   const lastPrevuId = epargneSeries.ids.filter((id) => id > curId).pop() || null;
   renderCouverture($("#epargne-couverture"), currentScope, couverture, curId, paliers, lastPrevuId);
+  renderObjectif($("#epargne-couverture .cv-goal"), currentScope, epargneSeries, monthsById, curId, niveauOf(couverture.months));
   charts.line = cumulLineChart($("#chart-line"), epargneSeries, "Épargne cumulée", "#2563eb",
     paliers.map((p) => ({ index: p.index, label: `${p.up ? "↗" : "↘"} ${p.niveau.label}`, color: p.niveau.color })));
 
