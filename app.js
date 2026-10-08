@@ -4,7 +4,7 @@ import {
   getAuth, GoogleAuthProvider, signInWithCredential, signOut, onAuthStateChanged
 } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js";
 import {
-  getFirestore, doc, getDoc, setDoc, collection, getDocs, query, orderBy
+  getFirestore, doc, getDoc, setDoc, updateDoc, collection, getDocs, query, orderBy
 } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
 
 const app = initializeApp(firebaseConfig);
@@ -480,6 +480,18 @@ async function fetchCatalog() {
 async function fetchSettings() {
   const snap = await getDoc(doc(db, "meta", "settings"));
   return snap.exists() ? snap.data() : {};
+}
+
+// Plans d'épargne salariale (settings.plans) : updateDoc remplace le champ en entier, sinon un
+// plan retiré resterait (setDoc merge garde les clés absentes). Repli si le doc n'existe pas.
+async function persistPlans(plans) {
+  const ref = doc(db, "meta", "settings");
+  try {
+    await updateDoc(ref, { plans });
+  } catch (e) {
+    if (e && e.code === "not-found") await setDoc(ref, { plans }, { merge: true });
+    else throw e;
+  }
 }
 
 async function persistCatalog(cat) {
@@ -1516,7 +1528,9 @@ const CAP_HORIZON_MOIS = 600;
 const CAP_BASES = [
   { key: "total", label: "Épargne + invest." },
   { key: "epargne", label: "Épargne" },
-  { key: "investissement", label: "Investissement" }
+  { key: "investissement", label: "Investissement" },
+  // Proposé seulement si un PEE / PER entreprise est renseigné pour l'espace affiché.
+  { key: "tout", label: "Tout, avec PEE / PER" }
 ];
 
 function capKey(scope) { return "budget-cap-" + scope; }
@@ -1571,9 +1585,10 @@ function capitalize(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
 function renderCap(box, scope, seriesByBase, curId) {
   let saved = {};
   try { saved = JSON.parse(lsGet(capKey(scope)) || "{}") || {}; } catch (e) { saved = {}; }
+  const bases = CAP_BASES.filter((b) => seriesByBase[b.key]);
   const state = {
     cible: saved.cible > 0 ? saved.cible : CAP_DEFAULT,
-    base: CAP_BASES.some((b) => b.key === saved.base) ? saved.base : "total",
+    base: bases.some((b) => b.key === saved.base) ? saved.base : "total",
     rendement: Number.isFinite(saved.rendement) ? saved.rendement : 0
   };
 
@@ -1583,7 +1598,7 @@ function renderCap(box, scope, seriesByBase, curId) {
       <label>Objectif
         <span class="cap-field"><input type="number" class="cap-cible" min="1000" step="1000" /><i>€</i></span></label>
       <label>Sur
-        <select class="cap-base">${CAP_BASES.map((b) => `<option value="${b.key}">${b.label}</option>`).join("")}</select></label>
+        <select class="cap-base">${bases.map((b) => `<option value="${b.key}">${b.label}</option>`).join("")}</select></label>
       <label>Rendement annuel (projection)
         <span class="cap-field"><input type="number" class="cap-rendement" min="0" max="20" step="0.5" /><i>%</i></span></label>
     </div>
@@ -1701,6 +1716,154 @@ function capChart(canvas, series, p, curId, cible) {
     },
     plugins: [currentPointPlugin]
   });
+}
+
+// ---- Épargne salariale : PEE et PER entreprise (facultatifs, un de chaque par personne) ----
+// Stockés dans settings.plans["<type>-<owner>"] = { type, owner, solde, au, versement,
+// abondement, rendement, dispo }. On renseigne le solde d'un relevé (au = mois du relevé) ;
+// la valeur des autres mois s'en déduit avec les versements mensuels et le rendement annuel.
+// Argent bloqué : il n'entre pas dans l'autonomie de l'épargne, seulement (au choix) dans le cap.
+const PLAN_TYPES = {
+  pee: { label: "PEE", long: "Plan d'épargne entreprise", color: "#0d9488", dispoLabel: "Disponible à partir de" },
+  per: { label: "PER entreprise", long: "Plan d'épargne retraite d'entreprise", color: "#4f46e5", dispoLabel: "Départ à la retraite" }
+};
+
+function plansInScope(plans, scope) {
+  return Object.values(plans || {})
+    .filter((p) => PLAN_TYPES[p.type] && OWNER_KEYS.includes(p.owner) && inScope(p, scope))
+    .sort((a, b) => OWNER_KEYS.indexOf(a.owner) - OWNER_KEYS.indexOf(b.owner) || (a.type < b.type ? -1 : 1));
+}
+
+// Valeur du plan au mois `id`, à partir du relevé : capitalisation mensuelle + versements
+// (personnels + abondement) en avant ; on remonte le calcul pour un mois antérieur au relevé.
+function planValueAt(p, id) {
+  const t = Math.pow(1 + (p.rendement || 0) / 100, 1 / 12) - 1;
+  const contrib = (p.versement || 0) + (p.abondement || 0);
+  const n = monthsBetween(p.au || monthId(new Date()), id);
+  let v = p.solde || 0;
+  for (let i = 0; i < n; i++) v = v * (1 + t) + contrib;
+  for (let i = 0; i < -n; i++) v = Math.max(0, (v - contrib) / (1 + t));
+  return v;
+}
+
+function plansSeries(plans, ids) {
+  return { ids, labels: ids.map(monthLabelShort), values: ids.map((id) => plans.reduce((s, p) => s + planValueAt(p, id), 0)) };
+}
+
+async function savePlans(plans) {
+  try {
+    await persistPlans(plans);
+  } catch (e) {
+    console.error(e);
+    alert("Enregistrement impossible : " + ((e && e.message) || e));
+  }
+  await renderAnalyse();
+}
+
+// Une carte par plan de l'espace affiché (champs modifiables, valeur estimée, disponibilité) +
+// une barre pour en ajouter. Chaque modification est enregistrée puis l'onglet se redessine
+// (le cap des 100 000 € peut en dépendre).
+function renderPlans(container, scope, allPlans, curId) {
+  const plans = { ...(allPlans || {}) };
+  const list = plansInScope(plans, scope);
+  container.innerHTML = "";
+
+  const grid = el("div", "plans-grid");
+  list.forEach((p) => grid.appendChild(planCard(p, plans, curId)));
+  if (list.length) container.appendChild(grid);
+
+  // Barre d'ajout : en vue Famille, on choisit la personne ; un seul PEE et un seul PER chacun.
+  const owners = scope === "famille" ? OWNER_KEYS : [scope];
+  const bar = el("div", "plans-add");
+  bar.appendChild(el("span", "plans-add-lbl", list.length ? "Ajouter" : "Aucun PEE ni PER entreprise renseigné. Ajouter :"));
+  let ownerSel = null;
+  if (owners.length > 1) {
+    ownerSel = el("select", "plans-owner");
+    ownerSel.setAttribute("aria-label", "Personne");
+    ownerSel.innerHTML = owners.map((k) => `<option value="${k}">${OWNER_LABEL[k]}</option>`).join("");
+    bar.appendChild(ownerSel);
+  }
+  const buttons = Object.entries(PLAN_TYPES).map(([type, def]) => {
+    const btn = el("button", "btn small plans-add-btn", `+ ${def.label}`);
+    btn.type = "button";
+    btn.style.setProperty("--pt", def.color);
+    btn.addEventListener("click", () => {
+      const owner = ownerSel ? ownerSel.value : owners[0];
+      plans[`${type}-${owner}`] = { type, owner, solde: 0, au: curId, versement: 0, abondement: 0, rendement: 0, dispo: null };
+      savePlans(plans);
+    });
+    bar.appendChild(btn);
+    return [type, btn];
+  });
+  const refreshButtons = () => {
+    const owner = ownerSel ? ownerSel.value : owners[0];
+    buttons.forEach(([type, btn]) => {
+      const exists = !!plans[`${type}-${owner}`];
+      btn.disabled = exists;
+      btn.title = exists ? `${OWNER_LABEL[owner]} a déjà un ${PLAN_TYPES[type].label}` : "";
+    });
+  };
+  if (ownerSel) ownerSel.addEventListener("change", refreshButtons);
+  refreshButtons();
+  container.appendChild(bar);
+}
+
+function planCard(p, plans, curId) {
+  const def = PLAN_TYPES[p.type];
+  const key = `${p.type}-${p.owner}`;
+  const contrib = (p.versement || 0) + (p.abondement || 0);
+  const now = planValueAt(p, curId);
+  const in5 = planValueAt(p, addMonths(curId, 60));
+  let dispoTxt = p.type === "per" ? "Bloqué jusqu'à la retraite (sauf cas de déblocage anticipé)." : "Date de disponibilité non renseignée.";
+  if (p.dispo) {
+    const n = monthsBetween(curId, p.dispo);
+    dispoTxt = n <= 0
+      ? `<b>Disponible</b> depuis ${monthLabel(p.dispo)}.`
+      : `Disponible dans <b>${dureeTexte(n)}</b> (${monthLabel(p.dispo)}) : environ <b>${euros(planValueAt(p, p.dispo))}</b>.`;
+  }
+
+  const card = el("section", "card plan-card");
+  card.style.setProperty("--pt", def.color);
+  card.innerHTML = `
+    <div class="plan-head">
+      <span class="plan-tag" title="${def.long}">${def.label}</span>
+      <span class="own-chip" style="--oc:${ownerColor(p.owner)}">${OWNER_LABEL[p.owner]}</span>
+      <button type="button" class="plan-remove" title="Retirer ce plan">✕</button>
+    </div>
+    <div class="plan-hero">
+      <span class="plan-big">${euros(now)}</span>
+      <span class="plan-sub">valeur estimée aujourd'hui${p.au && p.au !== curId ? ` · relevé de ${monthLabel(p.au)}` : ""}</span>
+    </div>
+    <div class="plan-fields">
+      <label>Solde du relevé<span class="cap-field"><input type="number" step="0.01" data-f="solde" /><i>€</i></span></label>
+      <label>Relevé de<input type="month" data-f="au" /></label>
+      <label>Versement perso / mois<span class="cap-field"><input type="number" step="1" data-f="versement" /><i>€</i></span></label>
+      <label>Abondement / mois<span class="cap-field"><input type="number" step="1" data-f="abondement" /><i>€</i></span></label>
+      <label>Rendement annuel<span class="cap-field"><input type="number" step="0.5" data-f="rendement" /><i>%</i></span></label>
+      <label>${def.dispoLabel}<input type="month" data-f="dispo" /></label>
+    </div>
+    <dl class="cv-facts plan-facts">
+      <div><dt>Versé / mois</dt><dd>${euros(contrib)}${p.abondement ? `<small>dont ${euros(p.abondement)} employeur</small>` : ""}</dd></div>
+      <div><dt>Dans 5 ans</dt><dd>${euros(in5)}<small>${monthLabel(addMonths(curId, 60))}</small></dd></div>
+      <div><dt>Intérêts sur 5 ans</dt><dd>${euros(Math.max(0, in5 - now - contrib * 60))}<small>hors versements</small></dd></div>
+    </dl>
+    <p class="plan-dispo">${dispoTxt}</p>`;
+
+  card.querySelectorAll("[data-f]").forEach((input) => {
+    const f = input.dataset.f;
+    input.value = p[f] ?? "";
+    input.addEventListener("change", () => {
+      const v = input.type === "month" ? (input.value || null) : (parseFloat(input.value) || 0);
+      plans[key] = { ...p, [f]: f === "au" ? (v || curId) : v };
+      savePlans(plans);
+    });
+  });
+  card.querySelector(".plan-remove").addEventListener("click", () => {
+    if (!confirm(`Retirer le ${def.label} de ${OWNER_LABEL[p.owner]} ? Ses informations seront effacées.`)) return;
+    delete plans[key];
+    savePlans(plans);
+  });
+  return card;
 }
 
 // Mois abrégé sans point, lisible dans une case étroite : "nov", "déc", "janv", "févr"...
@@ -1985,9 +2148,13 @@ async function renderAnalyse() {
     baseKey: "investissementBase", startKey: "investissementStart", role: "investissement", defaultStart: "2026-08"
   });
   charts.investment = cumulLineChart($("#chart-investment"), invSeries, "Investissement cumulé", "#059669");
+  const totalSeries = sumCumulSeries(epargneSeries, invSeries);
+  const plans = plansInScope(settings.plans, currentScope);
   renderCap($("#epargne-cap"), currentScope, {
-    total: sumCumulSeries(epargneSeries, invSeries), epargne: epargneSeries, investissement: invSeries
+    total: totalSeries, epargne: epargneSeries, investissement: invSeries,
+    tout: plans.length ? sumCumulSeries(totalSeries, plansSeries(plans, totalSeries.ids)) : null
   }, curId);
+  renderPlans($("#plans-salariaux"), currentScope, settings.plans, curId);
 
   // Reste à vivre de chaque mois (pas cumulé) : la tendance mois après mois, avec les mois
   // en négatif mis en évidence pour repérer vite les périodes tendues. Juin 2026 est exclu :
