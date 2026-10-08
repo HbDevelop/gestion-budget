@@ -680,6 +680,16 @@ body {
   background: #fff;
 }
 .cap-field i { position: absolute; right: 8px; top: 50%; transform: translateY(-50%); font-style: normal; color: var(--text-muted); }
+/* Rentrées exceptionnelles : liste repliable de postes à cocher, sous les réglages du cap */
+.cap-excl { margin-top: 4px; padding-top: 10px; border-top: 1px solid var(--border); font-size: 12px; }
+.cap-excl summary { cursor: pointer; font-weight: 600; color: var(--text); }
+.cap-excl-count { color: var(--kc); }
+.cap-excl p { margin: 6px 0; font-size: 11px; color: var(--text-muted); line-height: 1.4; }
+.cap-excl-list { display: flex; flex-direction: column; gap: 4px; max-height: 220px; overflow-y: auto; }
+.cap-excl-list label { display: flex; align-items: center; gap: 6px; flex-direction: row; font-size: 12px; color: var(--text); cursor: pointer; }
+.cap-excl-list label > span:last-child { min-width: 0; overflow-wrap: anywhere; }
+.cap-excl-list .poste-owner-dot { margin-right: 0; }
+.cap-excl-list em { color: var(--text-muted); }
 .cap-side { display: flex; flex-direction: column; gap: 12px; min-width: 0; }
 .cap-res { display: flex; flex-direction: column; gap: 8px; }
 .cap-hero { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 12px; }
