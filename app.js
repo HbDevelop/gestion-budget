@@ -1784,8 +1784,12 @@ function capChart(canvas, series, p, curId, cible) {
   proj.forEach((x) => pts.push({ ...x, prevu: false }));
   const lastPrevu = pts.filter((x) => x.prevu).length - 1;
   const reachIdx = pts.findIndex((x) => x.id === p.reachId);
+  // Aujourd'hui = mois en cours, ou dernier mois connu avant (la courbe peut avoir des trous).
+  let todayIdx = -1;
+  pts.forEach((x, i) => { if (x.id <= curId) todayIdx = i; });
   const color = { atteint: "#059669", prevu: "#059669", projete: "#b7791f", hors: "#6b7280" }[p.status];
-  const radius = (i) => (i === reachIdx ? 7 : pts.length > 40 ? 0 : 2.5);
+  // Les deux repères sont dessinés par capMarksPlugin : pas de point Chart.js à ces endroits.
+  const radius = (i) => (i === reachIdx || i === todayIdx ? 0 : pts.length > 40 ? 0 : 2.5);
   return new Chart(canvas, {
     type: "line",
     data: {
@@ -1809,7 +1813,7 @@ function capChart(canvas, series, p, curId, cible) {
     },
     options: {
       maintainAspectRatio: false,
-      layout: { padding: { top: 34, right: 12 } },
+      layout: { padding: { top: 48, right: 14 } },
       interaction: { mode: "index", intersect: false },
       scales: {
         x: { ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 10 } },
@@ -1821,11 +1825,163 @@ function capChart(canvas, series, p, curId, cible) {
           filter: (item) => item.raw != null && !(item.datasetIndex === 1 && item.dataIndex === lastPrevu),
           callbacks: { label: (ctx) => `${ctx.dataset.label} : ${euros(ctx.raw)}` }
         },
-        currentPoint: { index: reachIdx, dataset: pts[reachIdx]?.prevu ? 0 : 1, color }
+        capMarks: {
+          today: todayIdx >= 0 && todayIdx !== reachIdx ? { index: todayIdx, dataset: 0, value: pts[todayIdx].value } : null,
+          reach: reachIdx >= 0 ? { index: reachIdx, dataset: pts[reachIdx].prevu ? 0 : 1, value: pts[reachIdx].value, id: p.reachId } : null,
+          color,
+          duree: p.reachId && p.reachId > curId ? dureeTexte(monthsBetween(curId, p.reachId)) : ""
+        }
       }
     },
-    plugins: [currentPointPlugin]
+    plugins: [capMarksPlugin]
   });
+}
+
+// Repères de la courbe du cap : "Aujourd'hui" (bleu, bulle blanche) et "Objectif" (couleur du
+// statut, bulle pleine), reliés au bas du graphe par un trait vertical ; entre les deux, une bande
+// teintée avec la durée restante, pour lire d'un coup d'œil le chemin qui reste à parcourir.
+const capMarksPlugin = {
+  id: "capMarks",
+  pointOf(chart, m) {
+    const el = m && chart.getDatasetMeta(m.dataset).data[m.index];
+    return el && Number.isFinite(el.x) && Number.isFinite(el.y) ? el : null;
+  },
+  beforeDatasetsDraw(chart, _args, opts) {
+    const a = this.pointOf(chart, opts.today);
+    const b = this.pointOf(chart, opts.reach);
+    if (!a || !b || b.x <= a.x) return;
+    const { ctx, chartArea } = chart;
+    ctx.save();
+    const grad = ctx.createLinearGradient(a.x, 0, b.x, 0);
+    grad.addColorStop(0, "rgba(37, 99, 235, 0.07)");
+    grad.addColorStop(1, hexAlpha(opts.color, 0.12));
+    ctx.fillStyle = grad;
+    ctx.fillRect(a.x, chartArea.top, b.x - a.x, chartArea.bottom - chartArea.top);
+    // Durée restante : flèche horizontale en bas de la bande, texte au milieu.
+    if (opts.duree) {
+      const y = chartArea.bottom - 12;
+      ctx.font = "600 11px system-ui, sans-serif";
+      const text = opts.duree;
+      const w = ctx.measureText(text).width + 14;
+      const mid = (a.x + b.x) / 2;
+      ctx.strokeStyle = hexAlpha(opts.color, 0.6);
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(a.x + 4, y); ctx.lineTo(b.x - 4, y);
+      ctx.moveTo(a.x + 9, y - 4); ctx.lineTo(a.x + 4, y); ctx.lineTo(a.x + 9, y + 4);
+      ctx.moveTo(b.x - 9, y - 4); ctx.lineTo(b.x - 4, y); ctx.lineTo(b.x - 9, y + 4);
+      ctx.stroke();
+      if (w < b.x - a.x - 20) {
+        ctx.fillStyle = "#fff";
+        ctx.beginPath();
+        ctx.roundRect(mid - w / 2, y - 9, w, 18, 9);
+        ctx.fill();
+        ctx.fillStyle = opts.color;
+        ctx.textAlign = "center";
+        ctx.textBaseline = "middle";
+        ctx.fillText(text, mid, y);
+      }
+    }
+    ctx.restore();
+  },
+  afterDatasetsDraw(chart, _args, opts) {
+    const { ctx, chartArea } = chart;
+    const a = this.pointOf(chart, opts.today);
+    const b = this.pointOf(chart, opts.reach);
+    const guide = (pt, col) => {
+      ctx.save();
+      ctx.strokeStyle = hexAlpha(col, 0.45);
+      ctx.lineWidth = 1.5;
+      ctx.setLineDash([3, 4]);
+      ctx.beginPath();
+      ctx.moveTo(pt.x, pt.y + 10);
+      ctx.lineTo(pt.x, chartArea.bottom);
+      ctx.stroke();
+      ctx.restore();
+    };
+    // Point avec halo : anneau translucide, disque blanc cerclé, cœur coloré.
+    const dot = (pt, col) => {
+      ctx.save();
+      ctx.fillStyle = hexAlpha(col, 0.18);
+      ctx.beginPath(); ctx.arc(pt.x, pt.y, 12, 0, Math.PI * 2); ctx.fill();
+      ctx.fillStyle = "#fff";
+      ctx.strokeStyle = col;
+      ctx.lineWidth = 2.5;
+      ctx.beginPath(); ctx.arc(pt.x, pt.y, 6.5, 0, Math.PI * 2); ctx.fill(); ctx.stroke();
+      ctx.fillStyle = col;
+      ctx.beginPath(); ctx.arc(pt.x, pt.y, 2.5, 0, Math.PI * 2); ctx.fill();
+      ctx.restore();
+    };
+    // Bulle à deux lignes (petit titre + montant) : au-dessus du point si possible, sinon à
+    // gauche (point en haut du graphe, ex. l'objectif), sinon dessous.
+    const bubble = (pt, title, value, col, filled, avoid) => {
+      ctx.save();
+      ctx.font = "700 10px system-ui, sans-serif";
+      const tw = ctx.measureText(title).width;
+      ctx.font = "700 13px system-ui, sans-serif";
+      const vw = ctx.measureText(value).width;
+      const w = Math.max(tw, vw) + 18;
+      const h = 36;
+      const overlaps = (x, y) => avoid && x < avoid.x + avoid.w && x + w > avoid.x && y < avoid.y + avoid.h && y + h > avoid.y;
+      let x = Math.min(Math.max(pt.x - w / 2, chartArea.left), chartArea.right - w);
+      let y = pt.y - h - 16;
+      let side = "above";
+      if (y < chartArea.top - 40 || overlaps(x, y)) {
+        const lx = pt.x - w - 16;
+        const ly = Math.max(chartArea.top - 40, pt.y - h / 2);
+        if (lx >= chartArea.left && !overlaps(lx, ly)) { side = "left"; x = lx; y = ly; }
+        else { side = "below"; y = pt.y + 16; }
+      }
+      ctx.shadowColor = "rgba(15, 23, 42, 0.18)";
+      ctx.shadowBlur = 8;
+      ctx.shadowOffsetY = 2;
+      ctx.fillStyle = filled ? col : "#fff";
+      ctx.beginPath();
+      ctx.roundRect(x, y, w, h, 8);
+      ctx.fill();
+      ctx.shadowColor = "transparent";
+      if (!filled) { ctx.strokeStyle = col; ctx.lineWidth = 1.5; ctx.stroke(); }
+      // Petite pointe vers le point (vers le bas, le haut ou la droite selon la place de la bulle).
+      const tri = side === "left"
+        ? [[x + w - 1, pt.y - 6], [x + w + 6, pt.y], [x + w - 1, pt.y + 6]]
+        : side === "below"
+          ? [[pt.x - 6, y + 1], [pt.x, y - 6], [pt.x + 6, y + 1]]
+          : [[pt.x - 6, y + h - 1], [pt.x, y + h + 6], [pt.x + 6, y + h - 1]];
+      ctx.fillStyle = filled ? col : "#fff";
+      ctx.beginPath();
+      ctx.moveTo(...tri[0]); ctx.lineTo(...tri[1]); ctx.lineTo(...tri[2]);
+      ctx.closePath();
+      ctx.fill();
+      if (!filled) {
+        ctx.strokeStyle = col; ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.moveTo(...tri[0]); ctx.lineTo(...tri[1]); ctx.lineTo(...tri[2]);
+        ctx.stroke();
+      }
+      ctx.textAlign = "left";
+      ctx.textBaseline = "middle";
+      ctx.font = "700 10px system-ui, sans-serif";
+      ctx.fillStyle = filled ? "rgba(255, 255, 255, 0.85)" : col;
+      ctx.fillText(title, x + 9, y + 11);
+      ctx.font = "700 13px system-ui, sans-serif";
+      ctx.fillStyle = filled ? "#fff" : "#1c2331";
+      ctx.fillText(value, x + 9, y + 25);
+      ctx.restore();
+      return { x, y, w, h };
+    };
+    if (b) guide(b, opts.color);
+    if (a) guide(a, "#2563eb");
+    if (b) dot(b, opts.color);
+    if (a) dot(a, "#2563eb");
+    const rb = b ? bubble(b, `OBJECTIF · ${monthLabelShort(opts.reach.id).toUpperCase()}`, euros(opts.reach.value), opts.color, true, null) : null;
+    if (a) bubble(a, "AUJOURD'HUI", euros(opts.today.value), "#2563eb", false, rb);
+  }
+};
+
+// "#b7791f" + 0.2 → "rgba(183, 121, 31, 0.2)"
+function hexAlpha(hex, alpha) {
+  const n = parseInt(hex.slice(1), 16);
+  return `rgba(${(n >> 16) & 255}, ${(n >> 8) & 255}, ${n & 255}, ${alpha})`;
 }
 
 // ---- Épargne salariale : PEE et PER entreprise (facultatifs, un de chaque par personne) ----
