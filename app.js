@@ -494,6 +494,17 @@ async function persistPlans(plans) {
   }
 }
 
+// Rendement annuel estimé de l'investissement d'une personne : settings.byScope.<owner>.investissementRendement
+async function persistInvRendement(owner, rate) {
+  const ref = doc(db, "meta", "settings");
+  try {
+    await updateDoc(ref, { [`byScope.${owner}.investissementRendement`]: rate });
+  } catch (e) {
+    if (e && e.code === "not-found") await setDoc(ref, { byScope: { [owner]: { investissementRendement: rate } } }, { merge: true });
+    else throw e;
+  }
+}
+
 async function persistCatalog(cat) {
   await setDoc(doc(db, "meta", "catalog"), cat);
 }
@@ -1371,7 +1382,9 @@ const centerTextPlugin = {
 // boucle unique : Habib et Marwa n'ont pas le même mois de départ, une base combinée avec un
 // seul point de départ ferait perdre l'historique de celui qui est suivi depuis plus longtemps
 // (c'est ce qui rendait le total Famille différent de Habib + Marwa).
-function reserveCumulSeries(scope, months, settings, { baseKey, startKey, role, outRole, defaultStart }) {
+// `rateKey` (optionnel) : réglage par personne d'un rendement annuel en %, capitalisé chaque mois
+// sur le cumul (valeur estimée d'un placement, au lieu du seul total versé).
+function reserveCumulSeries(scope, months, settings, { baseKey, startKey, role, outRole, defaultStart, rateKey }) {
   const owners = scope === "famille" ? OWNER_KEYS : [scope];
   const seriesByOwner = owners.map((owner) => {
     const sc = (settings.byScope && settings.byScope[owner]) || {};
@@ -1379,13 +1392,15 @@ function reserveCumulSeries(scope, months, settings, { baseKey, startKey, role, 
     const start = sc[startKey] || settings[startKey] || defaultStart || null;
     const items = catalog.items.filter((it) => it.role === role && inScope(it, owner));
     const outItems = outRole ? catalog.items.filter((it) => it.role === outRole && inScope(it, owner)) : [];
+    const rate = rateKey ? (sc[rateKey] || 0) : 0;
+    const t = Math.pow(1 + rate / 100, 1 / 12) - 1;
     let cumul = base;
     const byId = {};
     (start ? months.filter(({ id }) => id >= start) : months).forEach(({ id, data: d }) => {
       const values_ = d.values || {};
       const amount = items.reduce((s, it) => s + ((values_[it.id] && values_[it.id].amount) || 0), 0);
       const out = outItems.reduce((s, it) => s + ((values_[it.id] && values_[it.id].amount) || 0), 0);
-      cumul += amount - out;
+      cumul = cumul * (1 + t) + amount - out;
       byId[id] = cumul;
     });
     return byId;
@@ -1401,6 +1416,44 @@ function reserveCumulSeries(scope, months, settings, { baseKey, startKey, role, 
     }
   });
   return { ids, labels, values };
+}
+
+// ---- Rendement de l'investissement ----
+function invRendements(settings, scope) {
+  const owners = scope === "famille" ? OWNER_KEYS : [scope];
+  return owners.map((owner) => {
+    const sc = (settings.byScope && settings.byScope[owner]) || {};
+    return { owner, rate: sc.investissementRendement || 0 };
+  });
+}
+
+// Réglage du rendement annuel (un champ par personne en vue Famille) + valeur estimée aujourd'hui
+// et plus-value par rapport au total versé.
+function renderInvRendement(box, rates, invSeries, invVerse, curId) {
+  let valeur = 0;
+  let verse = 0;
+  invSeries.ids.forEach((id, i) => { if (id <= curId) { valeur = invSeries.values[i]; verse = invVerse.values[i]; } });
+  const famille = rates.length > 1;
+  box.innerHTML = `
+    <div class="inv-rate-fields">
+      <span class="inv-rate-lbl">Rendement annuel estimé</span>
+      ${rates.map((r) => `<label>${famille ? `<span class="poste-owner-dot" style="--oc:${ownerColor(r.owner)}"></span>${OWNER_LABEL[r.owner]}` : ""}
+        <span class="cap-field"><input type="number" min="-50" max="50" step="0.5" data-owner="${r.owner}" value="${r.rate}"
+          aria-label="Rendement annuel ${escapeAttr(OWNER_LABEL[r.owner])}" /><i>%</i></span></label>`).join("")}
+    </div>
+    ${rates.some((r) => r.rate) ? `<div class="inv-rate-res">Valeur estimée aujourd'hui <b>${euros(valeur)}</b>
+      · versé ${euros(verse)} · <span class="${valeur - verse < 0 ? "negative" : "inv-gain"}">${valeur - verse >= 0 ? "+" : ""}${euros(valeur - verse)}</span></div>` : ""}`;
+  box.querySelectorAll("input[data-owner]").forEach((input) => {
+    input.addEventListener("change", async () => {
+      try {
+        await persistInvRendement(input.dataset.owner, parseFloat(input.value) || 0);
+      } catch (e) {
+        console.error(e);
+        alert("Enregistrement impossible : " + ((e && e.message) || e));
+      }
+      await renderAnalyse();
+    });
+  });
 }
 
 // ---- Autonomie de l'épargne ----
@@ -2031,7 +2084,7 @@ function renderCouverture(container, scope, c, curId, paliers = [], lastPrevuId 
 // point agrandi + étiquette permanente "<mois> : <valeur>" au-dessus, pour repérer d'un coup
 // d'œil où on en est au milieu des mois passés et des mois prévus.
 // `marks` (optionnel) : repères verticaux [{ index, label, color }] (changements de palier).
-function cumulLineChart(canvas, { ids, labels, values }, label, color, marks = []) {
+function cumulLineChart(canvas, { ids, labels, values }, label, color, marks = [], extra = []) {
   const idx = ids.indexOf(monthId(new Date()));
   const at = (special, normal) => values.map((_, i) => (i === idx ? special : normal));
   return new Chart(canvas, {
@@ -2045,11 +2098,16 @@ function cumulLineChart(canvas, { ids, labels, values }, label, color, marks = [
         pointBackgroundColor: at(color, "#fff"),
         pointBorderColor: color,
         pointBorderWidth: at(3, 1.5)
-      }]
+      }, ...extra]
     },
     options: {
       layout: { padding: { top: 34, right: 12 } },
-      plugins: { legend: { display: false }, currentPoint: { index: idx, color }, levelMarks: { marks } }
+      interaction: extra.length ? { mode: "index", intersect: false } : undefined,
+      plugins: {
+        legend: { display: extra.length > 0, position: "bottom", labels: { usePointStyle: true, pointStyle: "line" } },
+        tooltip: extra.length ? { callbacks: { label: (ctx) => `${ctx.dataset.label} : ${euros(ctx.raw)}` } } : {},
+        currentPoint: { index: idx, color }, levelMarks: { marks }
+      }
     },
     plugins: [levelMarksPlugin, currentPointPlugin]
   });
@@ -2201,10 +2259,16 @@ async function renderAnalyse() {
 
   // Investissement cumulé = solde de départ (à partir du mois configuré) + somme glissante
   // du poste Investissement, sans soustraction (pas de "retrait d'investissement" suivi).
-  const invSeries = reserveCumulSeries(currentScope, months, settings, {
-    baseKey: "investissementBase", startKey: "investissementStart", role: "investissement", defaultStart: "2026-08"
-  });
-  charts.investment = cumulLineChart($("#chart-investment"), invSeries, "Investissement cumulé", "#059669");
+  // Avec un rendement annuel renseigné (par personne), la courbe montre la valeur estimée, et le
+  // total versé apparaît en pointillés dessous. C'est la valeur estimée qui alimente le cap.
+  const invOpts = { baseKey: "investissementBase", startKey: "investissementStart", role: "investissement", defaultStart: "2026-08" };
+  const invSeries = reserveCumulSeries(currentScope, months, settings, { ...invOpts, rateKey: "investissementRendement" });
+  const invVerse = reserveCumulSeries(currentScope, months, settings, invOpts);
+  const invRates = invRendements(settings, currentScope);
+  const withRate = invRates.some((r) => r.rate > 0);
+  charts.investment = cumulLineChart($("#chart-investment"), invSeries, withRate ? "Valeur estimée" : "Investissement cumulé", "#059669", [],
+    withRate ? [{ label: "Total versé", data: invVerse.values, borderColor: "#9ca3af", borderDash: [5, 4], borderWidth: 1.5, pointRadius: 0, tension: 0.3 }] : []);
+  renderInvRendement($("#inv-rendement"), invRates, invSeries, invVerse, curId);
   const totalSeries = sumCumulSeries(epargneSeries, invSeries);
   const plans = plansInScope(settings.plans, currentScope);
   renderCap($("#epargne-cap"), currentScope, {
