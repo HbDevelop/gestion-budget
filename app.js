@@ -1543,7 +1543,34 @@ function sumCumulSeries(a, b) {
   return { ids, labels: ids.map(monthLabelShort), values: ids.map((id) => at(a, id) + at(b, id)) };
 }
 
-function capProjection(series, curId, cible, rendementAn) {
+// Postes marqués "exceptionnel" (catalogue, it.exceptionnel) : rentrées ponctuelles (prime,
+// héritage, vente...) qu'on ne veut pas voir se répéter dans la projection. Ils restent dans la
+// courbe et le montant atteint ; on retire seulement leur effet du rythme projeté. Effet sur la
+// courbe : un poste d'épargne / d'investissement y entre directement ; un revenu exceptionnel est
+// supposé mis de côté en épargne ; une reprise sur l'épargne (sortie) joue en négatif.
+function capExceptionnelEffect(item, base) {
+  const surEpargne = base !== "investissement";
+  if (item.role === "investissement") return base === "epargne" ? 0 : 1;
+  if (item.role === "epargne_out") return surEpargne ? -1 : 0;
+  if (item.role === "epargne" || item.type === "income") return surEpargne ? 1 : 0;
+  return 0;
+}
+
+function capExceptionnelSum(items, monthsById, base, ids) {
+  return ids.reduce((s, id) => {
+    const values = (monthsById[id] && monthsById[id].values) || {};
+    return s + items.reduce((t, it) => t + capExceptionnelEffect(it, base) * ((values[it.id] && values[it.id].amount) || 0), 0);
+  }, 0);
+}
+
+// Postes qu'on peut marquer exceptionnels depuis la carte : revenus (hors reprise sur l'épargne,
+// qui est une sortie) et postes d'épargne / d'investissement de l'espace affiché.
+function capCandidateItems(scope) {
+  return catalog.items.filter((it) => inScope(it, scope) && !it.retiredAt &&
+    (it.type === "income" || it.role === "epargne" || it.role === "investissement"));
+}
+
+function capProjection(series, curId, cible, rendementAn, exclu = () => 0) {
   const { ids, values } = series;
   const lastId = ids[ids.length - 1];
   const lastValue = values[values.length - 1];
@@ -1551,7 +1578,9 @@ function capProjection(series, curId, cible, rendementAn) {
   ids.forEach((id, i) => { if (id <= curId) current = values[i]; });
   const fromIdx = Math.max(0, ids.findIndex((id) => id >= addMonths(lastId, -12)));
   const span = monthsBetween(ids[fromIdx], lastId);
-  const rythme = span > 0 ? (lastValue - values[fromIdx]) / span : 0;
+  // Mois de la fenêtre (progression entre ids[fromIdx] et lastId) : on en retire l'exceptionnel.
+  const exceptionnel = exclu(ids.slice(fromIdx + 1));
+  const rythme = span > 0 ? (lastValue - values[fromIdx] - exceptionnel) / span : 0;
   const taux = Math.pow(1 + rendementAn / 100, 1 / 12) - 1;
 
   const hitIdx = values.findIndex((v) => v >= cible);
@@ -1566,7 +1595,7 @@ function capProjection(series, curId, cible, rendementAn) {
     }
   }
   const status = !reachId ? "hors" : reachId <= curId ? "atteint" : reachId <= lastId ? "prevu" : "projete";
-  return { current, lastId, lastValue, rythme, projection, reachId, status };
+  return { current, lastId, lastValue, rythme, exceptionnel, projection, reachId, status };
 }
 
 // "4 ans et 5 mois", "8 mois", "2 ans"
@@ -1582,7 +1611,7 @@ function capitalize(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
 
 // Carte "Cap des 100 000 €" : réglages à gauche (montant, base, rendement — mémorisés par espace
 // dans ce navigateur), date d'atteinte + progression + courbe prévue/projetée à droite.
-function renderCap(box, scope, seriesByBase, curId) {
+function renderCap(box, scope, seriesByBase, curId, monthsById) {
   let saved = {};
   try { saved = JSON.parse(lsGet(capKey(scope)) || "{}") || {}; } catch (e) { saved = {}; }
   const bases = CAP_BASES.filter((b) => seriesByBase[b.key]);
@@ -1601,12 +1630,20 @@ function renderCap(box, scope, seriesByBase, curId) {
         <select class="cap-base">${bases.map((b) => `<option value="${b.key}">${b.label}</option>`).join("")}</select></label>
       <label>Rendement annuel (projection)
         <span class="cap-field"><input type="number" class="cap-rendement" min="0" max="20" step="0.5" /><i>%</i></span></label>
+      <details class="cap-excl">
+        <summary>Rentrées exceptionnelles <span class="cap-excl-count"></span></summary>
+        <p>Cochées = gardées dans la courbe, mais pas répétées dans la projection.</p>
+        <div class="cap-excl-list">${capCandidateItems(scope).map((it) => `
+          <label><input type="checkbox" data-item-id="${it.id}" ${it.exceptionnel ? "checked" : ""} />
+            ${scope === "famille" ? `<span class="poste-owner-dot" style="--oc:${ownerColor(it.owner)}" title="${escapeAttr(OWNER_LABEL[it.owner] || it.owner)}"></span>` : ""}
+            <span>${escapeHtml(it.label)}${reserveTagHtml(it)}</span></label>`).join("") || "<em>Aucun poste de revenu ou d'épargne.</em>"}</div>
+      </details>
     </div>
     <div class="cap-side">
       <div class="cap-res"></div>
       <div class="cap-chart"><canvas></canvas></div>
       <dl class="cv-facts cap-facts"></dl>
-      <p class="cv-note">Courbe pleine = mois passés + Prévisions. Pointillés = projection au-delà du dernier mois prévu : progression moyenne des 12 derniers mois de la courbe, plus le rendement annuel s'il est indiqué.</p>
+      <p class="cv-note">Courbe pleine = mois passés + Prévisions. Pointillés = projection au-delà du dernier mois prévu : progression moyenne des 12 derniers mois de la courbe (hors rentrées exceptionnelles cochées), plus le rendement annuel s'il est indiqué.</p>
     </div>`;
   const inCible = box.querySelector(".cap-cible");
   const selBase = box.querySelector(".cap-base");
@@ -1634,7 +1671,10 @@ function renderCap(box, scope, seriesByBase, curId) {
       return;
     }
 
-    const p = capProjection(series, curId, state.cible, state.rendement);
+    const exclItems = capCandidateItems(scope).filter((it) => it.exceptionnel);
+    box.querySelector(".cap-excl-count").textContent = exclItems.length ? `(${exclItems.length})` : "";
+    const p = capProjection(series, curId, state.cible, state.rendement,
+      (ids) => capExceptionnelSum(exclItems, monthsById, state.base, ids));
     const pct = Math.max(0, Math.min(100, (p.current / state.cible) * 100));
     box.className = "card cap-card chart-wide " + p.status;
     const reachLabel = p.reachId ? capitalize(monthLabel(p.reachId)) : "";
@@ -1655,12 +1695,29 @@ function renderCap(box, scope, seriesByBase, curId) {
     facts.innerHTML = `
       <div><dt>Reste à constituer</dt><dd>${euros(Math.max(0, state.cible - p.current))}</dd></div>
       <div><dt>Fin des prévisions</dt><dd>${euros(p.lastValue)}<small>${monthLabel(p.lastId)}</small></dd></div>
-      <div><dt>Rythme projeté / mois</dt><dd>${euros(p.rythme)}<small>12 derniers mois prévus</small></dd></div>`;
+      <div><dt>Rythme projeté / mois</dt><dd>${euros(p.rythme)}<small>${p.exceptionnel
+        ? `hors ${euros(p.exceptionnel)} exceptionnels` : "12 derniers mois prévus"}</small></dd></div>`;
     charts.cap = capChart(box.querySelector(".cap-chart canvas"), series, p, curId, state.cible);
   };
   inCible.addEventListener("change", update);
   selBase.addEventListener("change", update);
   inRend.addEventListener("change", update);
+  // Marquage enregistré dans le catalogue (partagé entre appareils), puis recalcul sur place.
+  box.querySelectorAll(".cap-excl input").forEach((cb) => {
+    cb.addEventListener("change", async () => {
+      const item = catalog.items.find((it) => it.id === cb.dataset.itemId);
+      if (!item) return;
+      if (cb.checked) item.exceptionnel = true;
+      else delete item.exceptionnel;
+      update();
+      try {
+        await persistCatalog(catalog);
+      } catch (e) {
+        console.error(e);
+        alert("Enregistrement impossible : " + ((e && e.message) || e));
+      }
+    });
+  });
   update();
 }
 
@@ -2153,7 +2210,7 @@ async function renderAnalyse() {
   renderCap($("#epargne-cap"), currentScope, {
     total: totalSeries, epargne: epargneSeries, investissement: invSeries,
     tout: plans.length ? sumCumulSeries(totalSeries, plansSeries(plans, totalSeries.ids)) : null
-  }, curId);
+  }, curId, monthsById);
   renderPlans($("#plans-salariaux"), currentScope, settings.plans, curId);
 
   // Reste à vivre de chaque mois (pas cumulé) : la tendance mois après mois, avec les mois
