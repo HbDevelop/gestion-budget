@@ -300,7 +300,7 @@ let currentView = "suivi";
 // révèle renommage / espace / interne / suppression / ajout + la barre d'attribution.
 let forecastEdit = false;
 let charts = {
-  pie: null, pieAvg: null, line: null, investment: null, balance: null, occTop: null,
+  pie: null, pieAvg: null, line: null, investment: null, cap: null, balance: null, occTop: null,
   famIncome: null, famSplit: null, famStack: null
 };
 
@@ -1507,6 +1507,202 @@ function renderObjectif(box, scope, series, monthsById, curId, niveauActuel) {
   update();
 }
 
+// ---- Cap d'épargne (100 000 € par défaut) ----
+// Mois où le cumul (épargne, investissement ou les deux) atteint un montant cible : d'abord sur
+// la courbe (mois passés + Prévisions), puis au-delà du dernier mois prévu en prolongeant la
+// progression moyenne des 12 derniers mois de la courbe, avec un rendement annuel optionnel.
+const CAP_DEFAULT = 100000;
+const CAP_HORIZON_MOIS = 600;
+const CAP_BASES = [
+  { key: "total", label: "Épargne + invest." },
+  { key: "epargne", label: "Épargne" },
+  { key: "investissement", label: "Investissement" }
+];
+
+function capKey(scope) { return "budget-cap-" + scope; }
+
+// Somme de deux séries cumulées qui ne démarrent pas au même mois : chacune garde sa dernière
+// valeur connue (0 avant son premier mois).
+function sumCumulSeries(a, b) {
+  const ids = [...new Set([...a.ids, ...b.ids])].sort();
+  const at = (s, id) => { let v = 0; s.ids.forEach((x, i) => { if (x <= id) v = s.values[i]; }); return v; };
+  return { ids, labels: ids.map(monthLabelShort), values: ids.map((id) => at(a, id) + at(b, id)) };
+}
+
+function capProjection(series, curId, cible, rendementAn) {
+  const { ids, values } = series;
+  const lastId = ids[ids.length - 1];
+  const lastValue = values[values.length - 1];
+  let current = 0;
+  ids.forEach((id, i) => { if (id <= curId) current = values[i]; });
+  const fromIdx = Math.max(0, ids.findIndex((id) => id >= addMonths(lastId, -12)));
+  const span = monthsBetween(ids[fromIdx], lastId);
+  const rythme = span > 0 ? (lastValue - values[fromIdx]) / span : 0;
+  const taux = Math.pow(1 + rendementAn / 100, 1 / 12) - 1;
+
+  const hitIdx = values.findIndex((v) => v >= cible);
+  let reachId = hitIdx >= 0 ? ids[hitIdx] : null;
+  const projection = [];
+  if (!reachId && (rythme > 0 || (taux > 0 && lastValue > 0))) {
+    let v = lastValue;
+    for (let i = 1; i <= CAP_HORIZON_MOIS; i++) {
+      v = v * (1 + taux) + rythme;
+      projection.push({ id: addMonths(lastId, i), value: v });
+      if (v >= cible) { reachId = projection[projection.length - 1].id; break; }
+    }
+  }
+  const status = !reachId ? "hors" : reachId <= curId ? "atteint" : reachId <= lastId ? "prevu" : "projete";
+  return { current, lastId, lastValue, rythme, projection, reachId, status };
+}
+
+// "4 ans et 5 mois", "8 mois", "2 ans"
+function dureeTexte(n) {
+  const a = Math.floor(n / 12);
+  const m = n % 12;
+  const ans = a ? `${a} an${a > 1 ? "s" : ""}` : "";
+  const mois = m ? `${m} mois` : "";
+  return [ans, mois].filter(Boolean).join(" et ") || "moins d'un mois";
+}
+
+function capitalize(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
+
+// Carte "Cap des 100 000 €" : réglages à gauche (montant, base, rendement — mémorisés par espace
+// dans ce navigateur), date d'atteinte + progression + courbe prévue/projetée à droite.
+function renderCap(box, scope, seriesByBase, curId) {
+  let saved = {};
+  try { saved = JSON.parse(lsGet(capKey(scope)) || "{}") || {}; } catch (e) { saved = {}; }
+  const state = {
+    cible: saved.cible > 0 ? saved.cible : CAP_DEFAULT,
+    base: CAP_BASES.some((b) => b.key === saved.base) ? saved.base : "total",
+    rendement: Number.isFinite(saved.rendement) ? saved.rendement : 0
+  };
+
+  box.innerHTML = `
+    <div class="obj-form cap-form">
+      <h3>Cap des <span class="cap-title-amount"></span></h3>
+      <label>Objectif
+        <span class="cap-field"><input type="number" class="cap-cible" min="1000" step="1000" /><i>€</i></span></label>
+      <label>Sur
+        <select class="cap-base">${CAP_BASES.map((b) => `<option value="${b.key}">${b.label}</option>`).join("")}</select></label>
+      <label>Rendement annuel (projection)
+        <span class="cap-field"><input type="number" class="cap-rendement" min="0" max="20" step="0.5" /><i>%</i></span></label>
+    </div>
+    <div class="cap-side">
+      <div class="cap-res"></div>
+      <div class="cap-chart"><canvas></canvas></div>
+      <dl class="cv-facts cap-facts"></dl>
+      <p class="cv-note">Courbe pleine = mois passés + Prévisions. Pointillés = projection au-delà du dernier mois prévu : progression moyenne des 12 derniers mois de la courbe, plus le rendement annuel s'il est indiqué.</p>
+    </div>`;
+  const inCible = box.querySelector(".cap-cible");
+  const selBase = box.querySelector(".cap-base");
+  const inRend = box.querySelector(".cap-rendement");
+  inCible.value = state.cible;
+  selBase.value = state.base;
+  inRend.value = state.rendement;
+
+  const update = () => {
+    state.cible = parseFloat(inCible.value) > 0 ? parseFloat(inCible.value) : CAP_DEFAULT;
+    state.base = selBase.value;
+    state.rendement = Math.max(0, parseFloat(inRend.value) || 0);
+    lsSet(capKey(scope), JSON.stringify(state));
+    box.querySelector(".cap-title-amount").textContent = euros(state.cible).replace(/,00/, "");
+
+    const series = seriesByBase[state.base];
+    const res = box.querySelector(".cap-res");
+    const facts = box.querySelector(".cap-facts");
+    charts.cap?.destroy();
+    charts.cap = null;
+    if (!series.ids.length) {
+      box.className = "card cap-card chart-wide hors";
+      res.innerHTML = `<p class="cv-goal-empty">Pas encore de données d'épargne pour cet espace.</p>`;
+      facts.innerHTML = "";
+      return;
+    }
+
+    const p = capProjection(series, curId, state.cible, state.rendement);
+    const pct = Math.max(0, Math.min(100, (p.current / state.cible) * 100));
+    box.className = "card cap-card chart-wide " + p.status;
+    const reachLabel = p.reachId ? capitalize(monthLabel(p.reachId)) : "";
+    const dans = p.reachId ? dureeTexte(monthsBetween(curId, p.reachId)) : "";
+    const hero = {
+      atteint: [`✓ Atteint`, "déjà franchi", `Cap franchi en <b>${monthLabel(p.reachId || curId)}</b>.`],
+      prevu: [reachLabel, "d'après les prévisions", `Dans <b>${dans}</b>, sans rien changer à ce qui est prévu.`],
+      projete: [reachLabel, "projection", `Dans <b>${dans}</b>, au rythme de <b>${euros(p.rythme)}</b>/mois${state.rendement ? ` + ${state.rendement.toLocaleString("fr-FR")} %/an` : ""}.`],
+      hors: ["Hors de portée", "au rythme actuel", `La courbe ne progresse pas sur les 12 derniers mois prévus : ajoute de l'épargne dans Prévisions ou un rendement.`]
+    }[p.status];
+    res.innerHTML = `
+      <div class="cap-hero"><span class="cap-big">${hero[0]}</span><span class="cap-badge">${hero[1]}</span></div>
+      <p class="cap-when">${hero[2]}</p>
+      <div class="cap-progress" title="${Math.round(pct)} % de l'objectif">
+        <div class="cap-bar"><i style="width:${pct}%"></i></div>
+        <span><b>${euros(p.current)}</b> aujourd'hui · ${Math.round(pct)} %</span>
+      </div>`;
+    facts.innerHTML = `
+      <div><dt>Reste à constituer</dt><dd>${euros(Math.max(0, state.cible - p.current))}</dd></div>
+      <div><dt>Fin des prévisions</dt><dd>${euros(p.lastValue)}<small>${monthLabel(p.lastId)}</small></dd></div>
+      <div><dt>Rythme projeté / mois</dt><dd>${euros(p.rythme)}<small>12 derniers mois prévus</small></dd></div>`;
+    charts.cap = capChart(box.querySelector(".cap-chart canvas"), series, p, curId, state.cible);
+  };
+  inCible.addEventListener("change", update);
+  selBase.addEventListener("change", update);
+  inRend.addEventListener("change", update);
+  update();
+}
+
+// Courbe : 12 derniers mois + prévisions (trait plein), projection (pointillés) jusqu'au mois
+// d'atteinte, ligne horizontale de l'objectif, et le point d'atteinte étiqueté.
+function capChart(canvas, series, p, curId, cible) {
+  const start = addMonths(curId, -12);
+  const pts = series.ids.map((id, i) => ({ id, value: series.values[i], prevu: true })).filter((x) => x.id >= start);
+  // Projection sans atteinte : on montre seulement les 2 années qui suivent.
+  const proj = p.status === "hors" ? p.projection.slice(0, 24) : p.projection;
+  proj.forEach((x) => pts.push({ ...x, prevu: false }));
+  const lastPrevu = pts.filter((x) => x.prevu).length - 1;
+  const reachIdx = pts.findIndex((x) => x.id === p.reachId);
+  const color = { atteint: "#059669", prevu: "#059669", projete: "#b7791f", hors: "#6b7280" }[p.status];
+  const radius = (i) => (i === reachIdx ? 7 : pts.length > 40 ? 0 : 2.5);
+  return new Chart(canvas, {
+    type: "line",
+    data: {
+      labels: pts.map((x) => monthLabelShort(x.id)),
+      datasets: [
+        {
+          label: "Prévu", data: pts.map((x) => (x.prevu ? x.value : null)),
+          borderColor: "#2563eb", backgroundColor: "rgba(37, 99, 235, 0.08)", fill: true, tension: 0.3,
+          pointRadius: pts.map((_, i) => radius(i)), pointBackgroundColor: "#2563eb"
+        },
+        {
+          label: "Projection", data: pts.map((x, i) => (!x.prevu || i === lastPrevu ? x.value : null)),
+          borderColor: color, borderDash: [6, 5], tension: 0.3,
+          pointRadius: pts.map((_, i) => (i === lastPrevu ? 0 : radius(i))), pointBackgroundColor: color
+        },
+        {
+          label: "Objectif", data: pts.map(() => cible),
+          borderColor: "#9ca3af", borderWidth: 1, borderDash: [3, 3], pointRadius: 0
+        }
+      ]
+    },
+    options: {
+      maintainAspectRatio: false,
+      layout: { padding: { top: 34, right: 12 } },
+      interaction: { mode: "index", intersect: false },
+      scales: {
+        x: { ticks: { maxRotation: 0, autoSkip: true, maxTicksLimit: 10 } },
+        y: { suggestedMax: cible * 1.08, ticks: { callback: (v) => (v / 1000).toLocaleString("fr-FR") + " k€" } }
+      },
+      plugins: {
+        legend: { display: false },
+        tooltip: {
+          filter: (item) => item.raw != null && !(item.datasetIndex === 1 && item.dataIndex === lastPrevu),
+          callbacks: { label: (ctx) => `${ctx.dataset.label} : ${euros(ctx.raw)}` }
+        },
+        currentPoint: { index: reachIdx, dataset: pts[reachIdx]?.prevu ? 0 : 1, color }
+      }
+    },
+    plugins: [currentPointPlugin]
+  });
+}
+
 // Mois abrégé sans point, lisible dans une case étroite : "nov", "déc", "janv", "févr"...
 function monthAbbr(id) {
   const [y, m] = id.split("-").map(Number);
@@ -1682,13 +1878,15 @@ const levelMarksPlugin = {
   }
 };
 
-// Plugin Chart.js local : dessine l'étiquette du point d'index `options.index` (si présent).
+// Plugin Chart.js local : dessine l'étiquette du point d'index `options.index` (si présent),
+// sur le dataset `options.dataset` (le premier par défaut).
 const currentPointPlugin = {
   id: "currentPoint",
   afterDatasetsDraw(chart, _args, opts) {
     if (opts.index == null || opts.index < 0) return;
-    const point = chart.getDatasetMeta(0).data[opts.index];
-    const value = chart.data.datasets[0].data[opts.index];
+    const ds = opts.dataset || 0;
+    const point = chart.getDatasetMeta(ds).data[opts.index];
+    const value = chart.data.datasets[ds].data[opts.index];
     if (!point || value == null) return;
     const { ctx, chartArea } = chart;
     const text = `${chart.data.labels[opts.index]} : ${euros(value)}`;
@@ -1787,6 +1985,9 @@ async function renderAnalyse() {
     baseKey: "investissementBase", startKey: "investissementStart", role: "investissement", defaultStart: "2026-08"
   });
   charts.investment = cumulLineChart($("#chart-investment"), invSeries, "Investissement cumulé", "#059669");
+  renderCap($("#epargne-cap"), currentScope, {
+    total: sumCumulSeries(epargneSeries, invSeries), epargne: epargneSeries, investissement: invSeries
+  }, curId);
 
   // Reste à vivre de chaque mois (pas cumulé) : la tendance mois après mois, avec les mois
   // en négatif mis en évidence pour repérer vite les périodes tendues. Juin 2026 est exclu :
