@@ -711,7 +711,7 @@ body {
 .cap-progress b { color: var(--text); font-variant-numeric: tabular-nums; }
 .cap-bar { flex: 1; height: 10px; border-radius: 999px; background: var(--border); overflow: hidden; }
 .cap-bar i { display: block; height: 100%; border-radius: inherit; background: linear-gradient(90deg, #2563eb, var(--kc)); }
-.cap-chart { position: relative; height: 220px; }
+.cap-chart { position: relative; height: 260px; }
 @media (max-width: 480px) {
   .cap-big { font-size: 28px; }
   .cap-progress { flex-direction: column; align-items: stretch; gap: 4px; }
