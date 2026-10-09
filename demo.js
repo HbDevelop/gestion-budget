@@ -6,7 +6,7 @@
 
 // Empreinte SHA-256 de l'adresse du compte de démo (en minuscules) : l'adresse elle-même ne
 // figure pas dans ce dépôt public. Pour changer de compte de démo, remplacer cette empreinte.
-const DEMO_EMAIL_SHA256 = "e3cd176d4f328644decb22f2d45df3b8277b64e8b5509bcb24b034bc639ed5e6";
+const DEMO_EMAIL_SHA256 = "5a9a5a55347a1790fdc806a05bca35535ef6e9510ee492a16dbd638bd8eb1264";
 
 // Prénoms fictifs affichés à la place des espaces réels, dans l'ordre de SPACES.
 export const DEMO_LABELS = ["Thomas", "Léa"];

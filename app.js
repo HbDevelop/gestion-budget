@@ -7,7 +7,7 @@ import {
   getFirestore, doc, getDoc as fbGetDoc, setDoc as fbSetDoc, updateDoc as fbUpdateDoc,
   collection, getDocs as fbGetDocs, query, orderBy
 } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
-import { isDemoEmail, createDemoStore, DEMO_LABELS } from "./demo.js?v=1";
+import { isDemoEmail, createDemoStore, DEMO_LABELS } from "./demo.js?v=2";
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
