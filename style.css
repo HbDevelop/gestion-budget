@@ -982,3 +982,14 @@ body {
 .pb-sub b { font-weight: 700; }
 .pb-sub b.negative { color: var(--danger); }
 .pb-empty { color: var(--text-muted); font-size: 13px; padding: 10px 0; }
+
+/* Compte de démo : bandeau doré sous l'en-tête, impossible à confondre avec les vraies données */
+.demo-banner {
+  padding: 8px 16px;
+  text-align: center;
+  font-size: 13px;
+  color: #7c4a03;
+  background: repeating-linear-gradient(135deg, #fef3c7 0 14px, #fdecb5 14px 28px);
+  border-bottom: 1px solid #f3d27a;
+}
+.demo-banner b { text-transform: uppercase; letter-spacing: 0.05em; }

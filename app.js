@@ -4,12 +4,24 @@ import {
   getAuth, GoogleAuthProvider, signInWithCredential, signOut, onAuthStateChanged
 } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js";
 import {
-  getFirestore, doc, getDoc, setDoc, updateDoc, collection, getDocs, query, orderBy
+  getFirestore, doc, getDoc as fbGetDoc, setDoc as fbSetDoc, updateDoc as fbUpdateDoc,
+  collection, getDocs as fbGetDocs, query, orderBy
 } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
+import { isDemoEmail, createDemoStore, DEMO_LABELS } from "./demo.js?v=2";
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
 const db = getFirestore(app);
+
+// Compte de démo (voir demo.js) : toutes les lectures/écritures passent par ces quatre fonctions,
+// qui visent soit Firestore, soit le stockage en mémoire de la démo. Rien de la démo n'atteint
+// Firestore, et la démo ne lit jamais les vraies données.
+let demoStore = null;
+function getDoc(ref) { return demoStore ? demoStore.getDoc(ref.path) : fbGetDoc(ref); }
+function setDoc(ref, value, opts) { return demoStore ? demoStore.setDoc(ref.path, value, opts) : fbSetDoc(ref, value, opts); }
+function updateDoc(ref, fields) { return demoStore ? demoStore.updateDoc(ref.path, fields) : fbUpdateDoc(ref, fields); }
+// Seule requête de collection de l'appli : tous les mois (voir fetchAllMonthsAsc).
+function getDocs(q) { return demoStore ? demoStore.getDocs("months") : fbGetDocs(q); }
 
 // Un poste (revenu ou dépense) vit dans un catalogue partagé (doc meta/catalog) : ajouter,
 // supprimer ou renommer un poste se fait une seule fois et se répercute sur tous les mois
@@ -59,8 +71,10 @@ function ownerColor(key) { return OWNER_COLOR[key] || "#6b7280"; }
 function ownerBg(key) { return OWNER_BG[key] || "#f4f6f8"; }
 
 // localStorage peut lever (navigation privée, cookies bloqués) : on ne casse pas l'app pour ça.
-function lsGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
-function lsSet(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* ignoré */ } }
+// En démo, clés préfixées : les préférences de la démo ne se mélangent pas aux vraies.
+function lsKey(k) { return (demoStore ? "demo-" : "") + k; }
+function lsGet(k) { try { return localStorage.getItem(lsKey(k)); } catch (e) { return null; } }
+function lsSet(k, v) { try { localStorage.setItem(lsKey(k), v); } catch (e) { /* ignoré */ } }
 
 // Un poste appartient à un seul espace. Les postes du catalogue par défaut démarrent sur
 // le premier espace ; on réaffecte ensuite chaque poste depuis l'écran Prévisions.
@@ -423,10 +437,13 @@ onAuthStateChanged(auth, async (user) => {
   appShell.classList.add("hidden");
 
   if (!user) {
+    // Sortie de la démo : on recharge pour retrouver les vrais prénoms et un état propre.
+    if (demoStore) { location.reload(); return; }
     loginScreen.classList.remove("hidden");
     return;
   }
   userLabel.textContent = user.email;
+  if (await isDemoEmail(user.email)) enterDemo();
 
   // Pas de liste d'emails dans le code : l'autorisation est faite par les règles Firestore.
   // Si le compte n'est pas autorisé, la 1re lecture lève "permission-denied" → écran refusé.
@@ -447,6 +464,18 @@ onAuthStateChanged(auth, async (user) => {
   buildScopeSwitch();
   await loadMonth(currentMonthId);
 });
+
+// Mode démo : données fictives en mémoire, prénoms fictifs à la place des espaces réels, bandeau
+// visible, et pas d'adresse affichée (on présente l'appli à d'autres personnes).
+function enterDemo() {
+  demoStore = createDemoStore(OWNER_KEYS);
+  OWNER_KEYS.forEach((k, i) => { if (DEMO_LABELS[i]) OWNER_LABEL[k] = DEMO_LABELS[i]; });
+  SCOPE_TABS.forEach((t) => { if (OWNER_LABEL[t.key]) t.label = OWNER_LABEL[t.key]; });
+  const saved = lsGet("budget-scope");
+  currentScope = SCOPE_TABS.some((t) => t.key === saved) ? saved : DEFAULT_SCOPE;
+  userLabel.textContent = "Compte démo";
+  document.getElementById("demo-banner").classList.remove("hidden");
+}
 
 // ---- Navigation entre vues ----
 document.querySelectorAll(".nav-btn").forEach((btn) => {
@@ -1245,8 +1274,10 @@ async function addItem(type) {
   if (!label || !label.trim()) return;
   let owner = currentScope === "famille" ? FALLBACK_OWNER : currentScope;
   if (currentScope === "famille") {
-    const ans = (prompt("À quel espace ? " + OWNER_KEYS.join(" / "), FALLBACK_OWNER) || "").trim().toLowerCase();
-    if (OWNER_KEYS.includes(ans)) owner = ans;
+    const names = OWNER_KEYS.map((k) => OWNER_LABEL[k]);
+    const ans = (prompt("À quel espace ? " + names.join(" / "), OWNER_LABEL[FALLBACK_OWNER]) || "").trim().toLowerCase();
+    const match = OWNER_KEYS.find((k) => k === ans || OWNER_LABEL[k].toLowerCase() === ans);
+    if (match) owner = match;
   }
   catalog.items.push({ id: uid(), label: label.trim(), type, owner, retiredAt: null });
   await persistCatalog(catalog);
