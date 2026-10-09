@@ -9,7 +9,7 @@
 const DEMO_EMAIL_SHA256 = "5a9a5a55347a1790fdc806a05bca35535ef6e9510ee492a16dbd638bd8eb1264";
 
 // Prénoms fictifs affichés à la place des espaces réels, dans l'ordre de SPACES.
-export const DEMO_LABELS = ["Thomas", "Léa"];
+export const DEMO_LABELS = ["Julien", "Léa"];
 
 export async function isDemoEmail(email) {
   if (!email || !window.crypto?.subtle) return false;
