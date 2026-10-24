@@ -627,6 +627,18 @@ body {
 .tarif-prompt small { color: var(--text-muted); }
 .tarif-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 
+/* Pastille de statut cliquable (bascule faite / pas faite) */
+.chip-toggle {
+  border: none;
+  font-family: inherit;
+  cursor: pointer;
+  transition: box-shadow 0.15s ease, filter 0.15s ease;
+}
+.chip-toggle::after { content: "⇄"; margin-left: 2px; font-size: 10px; opacity: 0; transition: opacity 0.15s ease; }
+.chip-toggle:hover { box-shadow: inset 0 0 0 1px currentColor; }
+.chip-toggle:hover::after, .chip-toggle:focus-visible::after { opacity: 0.8; }
+.chip-toggle:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.35); }
+
 /* Zone « À traiter » (journal fermé) */
 .sx-todo {
   display: flex;

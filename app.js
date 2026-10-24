@@ -852,11 +852,17 @@ function seanceRow(item, s, mois, mode = "courant") {
   const [d, t] = s.date.split("T");
   const [y, m, j] = d.split("-").map(Number);
   const jour = new Date(y, m - 1, j).toLocaleDateString("fr-FR", { weekday: "short" });
+  // Pastille de statut cliquable : bascule faite <-> pas faite, à tout moment (même passée ou
+  // payée). Pas pour une séance annulée (« Rétablir ») ni d'un mois suivant (pas encore eue).
+  const basculable = etat !== "annulee" && mode !== "avenir";
+  const chipHtml = (cls, label, title) => basculable
+    ? `<button type="button" class="chip chip-toggle ${cls}" title="${title}">${label}</button>`
+    : `<span class="chip ${cls}">${label}</span>`;
   const chip = {
     annulee: `<span class="chip chip-annulee">Annulée</span>`,
-    faite: `<span class="chip chip-faite">✓ Faite</span>`,
-    confirmer: `<span class="chip chip-confirmer">À confirmer</span>`,
-    prevue: `<span class="chip chip-prevue">Prévue</span>`
+    faite: chipHtml("chip-faite", "✓ Faite", "Cliquer pour marquer non faite"),
+    confirmer: chipHtml("chip-confirmer", "À confirmer", "Cliquer pour marquer faite"),
+    prevue: chipHtml("chip-prevue", "Prévue", "Cliquer pour marquer faite")
   }[etat];
   const paye = s.paiement
     ? `<span class="chip chip-payee">${s.paiement.mode === "especes" ? "💶 Espèces" : "💳 Virement"} · ${shortDate(s.paiement.date)}</span>`
@@ -879,6 +885,10 @@ function seanceRow(item, s, mois, mode = "courant") {
     return b;
   };
   const patch = (p) => runSeanceOp("modifier", { mois, patch: p, paiement: s.paiement }, (docs) => modifierSeance(docs, mois, s.id, p));
+  const basculer = () => patch({ statut: s.statut === "faite" ? "prevue" : "faite" });
+  const chipBtn = card.querySelector(".chip-toggle");
+  if (chipBtn) chipBtn.addEventListener("click", basculer);
+  if (basculable && s.statut === "faite") btn(menu, "Marquer non faite", "sx-menu-item", basculer);
 
   if (s.statut === "annulee") {
     btn(actions, "↺ Rétablir", "sx-btn", () => patch({ statut: "prevue" }));
@@ -987,19 +997,21 @@ function aTraiterZone(item, arr) {
       eleveAvatar(item, s.eleveId) +
       `<div class="sx-todo-info"><b>${escapeHtml(nom)}</b><small>${seanceDateLabel(s.date)}` +
       (s.mois !== currentMonthId ? ` (${monthLabelShort(s.mois)})` : "") + ` · ${euros(s.prix)}</small></div>` +
-      (s.statut === "prevue" ? `<span class="chip chip-confirmer">À confirmer</span>` : `<span class="chip chip-due">Non payée</span>`);
+      (s.statut === "prevue" ? `<span class="chip chip-confirmer">À confirmer${s.paiement ? " · payée" : ""}</span>` : `<span class="chip chip-due">Non payée</span>`);
     const actions = el("div", "sx-todo-actions");
-    if (s.statut === "prevue") {
-      btn(actions, "✓ Faite", "sx-btn", "Séance faite (pas encore payée)", () =>
-        runSeanceOp("modifier", { mois: s.mois, patch: { statut: "faite" } }, (docs) => modifierSeance(docs, s.mois, s.id, { statut: "faite" })));
-    }
+    const statut = (st) => runSeanceOp("modifier", { mois: s.mois, patch: { statut: st } }, (docs) => modifierSeance(docs, s.mois, s.id, { statut: st }));
+    if (s.statut === "prevue") btn(actions, "✓ Faite", "sx-btn", "Séance faite (pas encore payée)", () => statut("faite"));
+    else btn(actions, "↺ Pas faite", "sx-btn", "Remettre la séance à confirmer (pas faite)", () => statut("prevue"));
     const payer = (mode) => runSeanceOp("payer", { mois: s.mois, date: todayStr() }, (docs) => {
       const ch = payerEtFaire(docs, s.mois, s.id, mode, todayStr());
       seancesFlash = { itemId: item.id, html: `✓ ${escapeHtml(nom)} · ${euros(s.prix)} encaissés ${mode === "especes" ? "en espèces 💶" : "par virement 💳"}.` };
       return ch;
     });
-    btn(actions, "💳", "sx-btn sx-btn-pay sx-todo-pay", "Payée par virement aujourd'hui", () => payer("virement"));
-    btn(actions, "💶", "sx-btn sx-btn-pay sx-todo-pay", "Payée en espèces aujourd'hui", () => payer("especes"));
+    // Déjà payée (puis remise « pas faite ») : pas de second paiement proposé.
+    if (!s.paiement) {
+      btn(actions, "💳", "sx-btn sx-btn-pay sx-todo-pay", "Payée par virement aujourd'hui", () => payer("virement"));
+      btn(actions, "💶", "sx-btn sx-btn-pay sx-todo-pay", "Payée en espèces aujourd'hui", () => payer("especes"));
+    }
     row.appendChild(actions);
     zone.appendChild(row);
   });
