@@ -7,7 +7,7 @@ import {
   getFirestore, doc, getDoc as fbGetDoc, setDoc as fbSetDoc, updateDoc as fbUpdateDoc, deleteField,
   collection, getDocs as fbGetDocs, query, orderBy
 } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
-import { isDemoEmail, createDemoStore, DEMO_LABELS } from "./demo.js?v=8";
+import { isDemoEmail, createDemoStore, DEMO_LABELS } from "./demo.js?v=9";
 import {
   monthId, addMonths, isActiveAt, inScope, isShared, receivedOf, cashOf, virementOf,
   withIncomeAmount, sumBankBalances, bankFor, cashFor, computeTotals, cloneForNewMonth,
@@ -17,8 +17,8 @@ import {
 import {
   isSeancesItem, hasSeances, seancesOfItem, monthOfDate, monthsNeeded, ajouterSeance, modifierSeance,
   payerSeance, annulerPaiement, supprimerSeance, arrieres, elevesOf, seancesATarifer, appliquerTarif,
-  datesRecurrentes, programmerSeances, seancesSerie, supprimerSeances
-} from "./seances.js?v=4";
+  datesRecurrentes, programmerSeances, seancesSerie, supprimerSeances, seancesFutures
+} from "./seances.js?v=5";
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -208,6 +208,9 @@ const elevesOuverts = new Set();
 let tarifEnAttente = null;
 // Programmation automatique : formulaire resté ouvert, et message de confirmation à afficher.
 const progOuverts = new Set();
+// Séances des mois suivants (section « Prochains mois » du journal) et sections ouvertes.
+let seancesAVenirListe = [];
+const futursOuverts = new Set();
 let seancesFlash = null;
 let charts = {
   pie: null, pieAvg: null, line: null, investment: null, cap: null, balance: null, occTop: null,
@@ -670,18 +673,23 @@ function suiviOpts() {
   return currentMonthId === monthId(new Date()) ? { arrieres: arrieresSeances.parPoste } : {};
 }
 
+// Impayés des mois passés et séances des mois suivants (une seule lecture de tous les mois).
 async function refreshArrieres() {
   const ids = catalog ? catalog.items.filter(isSeancesItem).map((it) => it.id) : [];
   const cur = monthId(new Date());
   if (!ids.length || currentMonthId !== cur) {
     arrieresSeances = { parPoste: {}, liste: [] };
+    seancesAVenirListe = [];
     return;
   }
   try {
-    arrieresSeances = arrieres(await fetchAllMonthsAsc(), cur, ids);
+    const months = await fetchAllMonthsAsc();
+    arrieresSeances = arrieres(months, cur, ids);
+    seancesAVenirListe = seancesFutures(months, cur, ids);
   } catch (e) {
     console.error(e);
     arrieresSeances = { parPoste: {}, liste: [] };
+    seancesAVenirListe = [];
   }
 }
 
@@ -747,7 +755,7 @@ async function runSeanceOp(op, args, apply) {
     for (const mid of others) await saveMonthChanges(monthStore, mid, docs[mid], changes[mid], saveMeta());
   });
   if (changes[currentMonthId]) await saveMonth();
-  if (others.some((mid) => mid < monthId(new Date()))) await refreshArrieres();
+  if (others.length) await refreshArrieres();
   render();
 }
 
@@ -794,7 +802,7 @@ function buildSeancesBlock(item) {
   if (arr.length) {
     panel.appendChild(el("div", "sx-section", `<h4>À encaisser</h4><span>mois précédents</span>`));
     const list = el("div", "sx-list");
-    arr.forEach((s) => list.appendChild(seanceRow(item, s, s.mois, true)));
+    arr.forEach((s) => list.appendChild(seanceRow(item, s, s.mois, "arriere")));
     panel.appendChild(list);
   }
   const mois = monthLabel(currentMonthId).toLowerCase();
@@ -804,8 +812,10 @@ function buildSeancesBlock(item) {
   panel.appendChild(el("div", "sx-section", `<h4>Séances ${/^[aeiouyéè]/.test(mois) ? "d'" : "de "}${mois}</h4><span>${resume}</span>`));
   const list = el("div", "sx-list");
   if (!seances.length) list.appendChild(el("p", "sx-empty", "Aucune séance enregistrée ce mois-ci. Ajoute la première ci-dessous."));
-  seances.forEach((s) => list.appendChild(seanceRow(item, s, currentMonthId, false)));
+  seances.forEach((s) => list.appendChild(seanceRow(item, s, currentMonthId, "courant")));
   panel.appendChild(list);
+  const futures = seancesAVenirListe.filter((s) => s.itemId === item.id);
+  if (futures.length) panel.appendChild(futuresSection(item, futures));
   panel.appendChild(seanceForm(item));
   panel.appendChild(programmationForm(item));
   panel.appendChild(elevesEditor(item));
@@ -828,7 +838,9 @@ function eleveAvatar(item, eleveId) {
 
 // Une séance : carte avec date, élève, prix, statut, paiement ; actions principales visibles,
 // les autres dans le menu « ⋯ ».
-function seanceRow(item, s, mois, arriere) {
+// `mode` : "courant" (mois affiché), "arriere" (impayé d'un mois passé), "avenir" (mois suivant).
+function seanceRow(item, s, mois, mode = "courant") {
+  const arriere = mode === "arriere";
   const passee = s.date.slice(0, 10) <= todayStr();
   const etat = s.statut === "annulee" ? "annulee" : s.statut === "faite" ? "faite" : passee ? "confirmer" : "prevue";
   const card = el("div", `sx-card sx-${etat}${s.paiement ? " sx-payee" : ""}`);
@@ -866,8 +878,12 @@ function seanceRow(item, s, mois, arriere) {
   if (s.statut === "annulee") {
     btn(actions, "↺ Rétablir", "sx-btn", () => patch({ statut: "prevue" }));
   } else {
-    if (s.statut === "prevue") btn(actions, "✓ Faite", "sx-btn", () => patch({ statut: "faite" }));
-    if (!s.paiement) {
+    // Mois suivants : séance pas encore eue, ni « faite » ni paiement proposés (seulement le menu).
+    const aVenir = mode === "avenir";
+    if (s.statut === "prevue" && !aVenir) btn(actions, "✓ Faite", "sx-btn", () => patch({ statut: "faite" }));
+    if (!s.paiement && aVenir) {
+      if (s.statut === "prevue") btn(menu, "Annuler la séance", "sx-menu-item", () => patch({ statut: "annulee" }));
+    } else if (!s.paiement) {
       const pay = el("div", "sx-pay");
       const date = el("input", "sx-paydate");
       date.type = "date";
@@ -921,6 +937,31 @@ function seanceRow(item, s, mois, arriere) {
   more.appendChild(menu);
   if (menu.children.length) card.appendChild(more);
   return card;
+}
+
+// Section « Prochains mois » : séances déjà planifiées après le mois en cours, par mois,
+// avec les mêmes cartes et actions (modifier l'heure, annuler, supprimer…).
+function futuresSection(item, futures) {
+  const box = el("details", "sx-futur");
+  const actives = futures.filter((s) => s.statut !== "annulee");
+  const total = actives.reduce((t, s) => t + (s.prix || 0), 0);
+  box.innerHTML = `<summary><span class="sx-plus">🗓️</span><span>Prochains mois</span>` +
+    `<small>${actives.length} séance${actives.length > 1 ? "s" : ""} · ${euros(total)}</small><span class="sx-chev">▾</span></summary>`;
+  box.open = futursOuverts.has(item.id);
+  box.addEventListener("toggle", () => {
+    if (box.open) futursOuverts.add(item.id); else futursOuverts.delete(item.id);
+  });
+  const parMois = {};
+  futures.forEach((s) => { (parMois[s.mois] = parMois[s.mois] || []).push(s); });
+  Object.entries(parMois).forEach(([mid, liste]) => {
+    const n = liste.filter((s) => s.statut !== "annulee");
+    box.appendChild(el("div", "sx-section sx-futur-mois",
+      `<h4>${capitalize(monthLabel(mid))}</h4><span>${n.length} séance${n.length > 1 ? "s" : ""} · ${euros(n.reduce((t, s) => t + (s.prix || 0), 0))}</span>`));
+    const list = el("div", "sx-list");
+    liste.forEach((s) => list.appendChild(seanceRow(item, s, mid, "avenir")));
+    box.appendChild(list);
+  });
+  return box;
 }
 
 // Un seul menu « ⋯ » ouvert à la fois ; un clic ailleurs le ferme.

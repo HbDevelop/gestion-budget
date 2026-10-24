@@ -627,6 +627,25 @@ body {
 .tarif-prompt small { color: var(--text-muted); }
 .tarif-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 
+/* Prochains mois */
+.sx-futur { border-radius: 12px; background: #fff; border: 1px solid var(--border); }
+.sx-futur summary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+}
+.sx-futur summary::-webkit-details-marker { display: none; }
+.sx-futur summary small { flex: 1; font-weight: 500; color: var(--text-muted); }
+.sx-futur[open] summary { border-bottom: 1px solid var(--border); }
+.sx-futur[open] summary .sx-chev { transform: rotate(180deg); }
+.sx-futur > .sx-list { padding: 0 10px 10px; }
+.sx-futur-mois { padding: 10px 12px 6px; margin: 0; }
+
 /* Programmation automatique */
 .sx-prog { border-radius: 12px; background: #fff; border: 1px solid var(--border); }
 .sx-prog summary {

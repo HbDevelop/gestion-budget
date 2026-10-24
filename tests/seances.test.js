@@ -6,7 +6,7 @@ import {
   isSeancesItem, monthOfDate, seancesOfItem, seancesValue, recomputeItem, monthsNeeded,
   ajouterSeance, modifierSeance, payerSeance, annulerPaiement, supprimerSeance, arrieres, elevesOf,
   seancesATarifer, appliquerTarif, datesRecurrentes, programmerSeances, seancesSerie, supprimerSeances,
-  MAX_PROGRAMMATION
+  MAX_PROGRAMMATION, seancesFutures
 } from "../seances.js";
 import { computeTotals, saveMonthChanges, monthPath } from "../budget-core.js";
 import { createFakeFirestore } from "./helpers/fake-firestore.js";
@@ -434,5 +434,33 @@ describe("estimation manuelle d'un mois", () => {
     ajouterSeance(docs, "a", seance("2026-10-28T18:00", 30));
     supprimerSeance(docs, "2026-10", "a");
     assert.deepEqual(docs["2026-10"].values[ETU], { amount: 510, received: 280, receivedCash: 200, recuSeances: 0, aVenir: 230, paid: false });
+  });
+});
+
+describe("séances des prochains mois", () => {
+  test("mois strictement après, postes demandés, annulées comprises, triées par date", () => {
+    const months = [
+      { id: "2026-10", data: { seances: { a: seance("2026-10-30T18:00", 30) } } },
+      { id: "2026-12", data: { seances: {
+        d: seance("2026-12-08T18:00", 30),
+        c: seance("2026-12-01T18:00", 30, { statut: "annulee" }),
+        x: { itemId: "autre", date: "2026-12-02T10:00", prix: 99, statut: "prevue", paiement: null }
+      } } },
+      { id: "2026-11", data: { seances: { b: seance("2026-11-03T18:00", 30) } } },
+      { id: "2026-09", data: {} }
+    ];
+    assert.deepEqual(seancesFutures(months, "2026-10", [ETU]).map((s) => [s.id, s.mois]),
+      [["b", "2026-11"], ["c", "2026-12"], ["d", "2026-12"]]);
+    assert.deepEqual(seancesFutures(months, "2026-12", [ETU]), []);
+    assert.deepEqual(seancesFutures(months, "2026-10", []), []);
+  });
+
+  test("modifier l'heure d'une séance d'un mois futur : prévu de ce mois inchangé, date mise à jour", () => {
+    const docs = { "2026-12": empty() };
+    ajouterSeance(docs, "d", seance("2026-12-08T18:00", 30));
+    const ch = modifierSeance(docs, "2026-12", "d", { date: "2026-12-08T17:00" });
+    assert.equal(docs["2026-12"].seances.d.date, "2026-12-08T17:00");
+    assert.equal(docs["2026-12"].values[ETU].amount, 30);
+    assert.deepEqual(Object.keys(ch), ["2026-12"]);
   });
 });

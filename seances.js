@@ -419,6 +419,19 @@ export function supprimerSeances(docs, seances) {
   return changes;
 }
 
+// Séances des mois APRÈS `apresMois` pour les postes `itemIds` (annulées comprises, pour pouvoir
+// les rétablir), triées par date : section « Prochains mois » du journal.
+export function seancesFutures(months, apresMois, itemIds) {
+  const out = [];
+  months.forEach(({ id, data }) => {
+    if (id <= apresMois) return;
+    Object.entries((data && data.seances) || {}).forEach(([sid, s]) => {
+      if (s && itemIds.includes(s.itemId)) out.push({ id: sid, mois: id, ...s });
+    });
+  });
+  return out.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+}
+
 // Élèves d'un poste (copie triée par nom, actifs d'abord).
 export function elevesOf(item) {
   return [...((item && item.eleves) || [])].sort((a, b) =>
