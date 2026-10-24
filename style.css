@@ -356,6 +356,22 @@ body {
 .eleve-row.inactif .eleve-nom { color: var(--text-muted); text-decoration: line-through; }
 .eleve-actif { display: inline-flex; gap: 4px; align-items: center; color: var(--text-muted); }
 .calc-cell { color: #6d28d9; font-style: italic; }
+.tarif-prompt {
+  margin-top: 6px;
+  padding: 8px 10px;
+  border: 1px solid #fde68a;
+  border-radius: 8px;
+  background: #fffbeb;
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.tarif-prompt small { color: var(--text-muted); }
+.tarif-actions { display: flex; flex-wrap: wrap; gap: 6px; }
+.tarif-actions .btn.small { padding: 4px 10px; font-size: 12.5px; }
+/* .btn.primary prend toute la largeur par défaut : pas dans les petits formulaires des séances. */
+.tarif-actions .btn.primary, .seance-form .btn.primary { width: auto; }
 /* Vue Famille : montant déjà encaissé devant le total pour un revenu partiel */
 .fam-recu { color: var(--text-muted); font-weight: 400; }
 @media (max-width: 640px) {

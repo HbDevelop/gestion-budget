@@ -4,7 +4,8 @@ import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import {
   isSeancesItem, monthOfDate, seancesOfItem, seancesValue, recomputeItem, monthsNeeded,
-  ajouterSeance, modifierSeance, payerSeance, annulerPaiement, supprimerSeance, arrieres, elevesOf
+  ajouterSeance, modifierSeance, payerSeance, annulerPaiement, supprimerSeance, arrieres, elevesOf,
+  seancesATarifer, appliquerTarif
 } from "../seances.js";
 import { computeTotals, saveMonthChanges, monthPath } from "../budget-core.js";
 import { createFakeFirestore } from "./helpers/fake-firestore.js";
@@ -289,5 +290,49 @@ describe("sauvegarde partielle des opérations", () => {
     assert.deepEqual(nov.values[ETU], { amount: 0, received: 30, receivedCash: 30, recuSeances: 30, aVenir: 0, paid: false });
     assert.equal(nov.values.sal.amount, 2000);
     assert.equal(nov.paiementsSeances.s1.seanceMois, "2026-10");
+  });
+});
+
+describe("changement de tarif d'un élève", () => {
+  // Noah (30 €) : une séance payée, une annulée, un impayé passé, une au prix ajusté, deux à venir.
+  const build = () => {
+    const docs = { "2026-09": empty(), "2026-10": empty(), "2026-11": empty() };
+    const noah = (date, prix, extra) => ({ itemId: ETU, eleveId: "noah", date, prix, ...extra });
+    ajouterSeance(docs, "paye", noah("2026-09-10T18:00", 30, { statut: "faite" }));
+    payerSeance(docs, "2026-09", "paye", "virement", "2026-09-10");
+    ajouterSeance(docs, "impaye", noah("2026-09-24T18:00", 30, { statut: "faite" }));
+    ajouterSeance(docs, "annulee", noah("2026-10-20T18:00", 30, { statut: "annulee" }));
+    ajouterSeance(docs, "ajuste", noah("2026-10-27T18:00", 20));
+    ajouterSeance(docs, "oct", noah("2026-10-30T18:00", 30));
+    ajouterSeance(docs, "nov", noah("2026-11-06T18:00", 30));
+    ajouterSeance(docs, "lina", seance("2026-11-06T17:00", 30));
+    return docs;
+  };
+  const list = (docs) => Object.entries(docs).map(([id, data]) => ({ id, data }));
+
+  test("à venir seulement : non payées, non annulées, au prix de l'ancien tarif, à partir du jour donné", () => {
+    const docs = build();
+    assert.deepEqual(seancesATarifer(list(docs), ETU, "noah", 30, { depuis: "2026-10-24" }).map((s) => s.id), ["oct", "nov"]);
+    assert.deepEqual(seancesATarifer(list(docs), ETU, "noah", 30).map((s) => s.id), ["impaye", "oct", "nov"]);
+    // Sans ancien tarif connu : toutes les non payées non annulées, prix ajusté compris.
+    assert.deepEqual(seancesATarifer(list(docs), ETU, "noah", null).map((s) => s.id), ["impaye", "ajuste", "oct", "nov"]);
+  });
+
+  test("appliquer : prix, prévu et reste dû recalculés sur chaque mois ; le reste intact", () => {
+    const docs = build();
+    const cibles = seancesATarifer(list(docs), ETU, "noah", 30);
+    assert.deepEqual(monthsNeeded("tarif", { seances: cibles }).sort(), ["2026-09", "2026-10", "2026-11"]);
+    const ch = appliquerTarif(docs, cibles, 35);
+    assert.equal(docs["2026-09"].seances.impaye.prix, 35);
+    assert.equal(docs["2026-09"].seances.paye.prix, 30, "séance payée inchangée");
+    assert.equal(docs["2026-10"].seances.ajuste.prix, 20, "prix ajusté gardé");
+    assert.equal(docs["2026-10"].seances.annulee.prix, 30);
+    assert.equal(docs["2026-11"].seances.lina.prix, 30, "autre élève inchangé");
+    assert.deepEqual([docs["2026-09"].values[ETU].amount, docs["2026-09"].values[ETU].aVenir], [65, 35]);
+    assert.deepEqual([docs["2026-10"].values[ETU].amount, docs["2026-10"].values[ETU].aVenir], [55, 55]);
+    assert.deepEqual([docs["2026-11"].values[ETU].amount, docs["2026-11"].values[ETU].aVenir], [65, 65]);
+    assert.deepEqual(Object.keys(ch).sort(), ["2026-09", "2026-10", "2026-11"]);
+    assert.throws(() => appliquerTarif(docs, cibles, -5), /Prix/);
+    assert.deepEqual(appliquerTarif(docs, [], 40), {});
   });
 });

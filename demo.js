@@ -4,7 +4,7 @@
 // rechargement). Le compte de démo ne doit PAS figurer dans les règles Firestore : même en
 // contournant l'appli, il n'a ainsi aucun accès aux vraies données.
 
-import { ajouterSeance, payerSeance } from "./seances.js?v=1";
+import { ajouterSeance, payerSeance } from "./seances.js?v=2";
 
 // Empreinte SHA-256 de l'adresse du compte de démo (en minuscules) : l'adresse elle-même ne
 // figure pas dans ce dépôt public. Pour changer de compte de démo, remplacer cette empreinte.

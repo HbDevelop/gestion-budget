@@ -172,6 +172,7 @@ export function monthsNeeded(op, args) {
   if (op === "payer") { out.add(args.mois); out.add(monthOfDate(args.date)); }
   if (op === "annulerPaiement") { out.add(args.mois); if (args.paiement) out.add(monthOfDate(args.paiement.date)); }
   if (op === "supprimer") out.add(args.mois);
+  if (op === "tarif") args.seances.forEach((s) => { out.add(s.mois); if (s.paiement) out.add(monthOfDate(s.paiement.date)); });
   return [...out];
 }
 
@@ -296,6 +297,34 @@ export function arrieres(months, avantMois, itemIds) {
   });
   liste.sort((a, b) => (a.date < b.date ? -1 : 1));
   return { parPoste, liste };
+}
+
+// Nouveau tarif d'un élève : séances à repasser au nouveau prix. Seulement les séances non
+// payées (l'argent reçu ne change pas) et non annulées, dont le prix est encore l'ancien tarif
+// (un prix ajusté à la main est gardé). `depuis` (AAAA-MM-JJ) : seulement à partir de ce jour.
+// `months` = [{ id, data }]. Renvoie les séances (avec leur mois).
+export function seancesATarifer(months, itemId, eleveId, ancienTarif, { depuis = null } = {}) {
+  const out = [];
+  months.forEach(({ id, data }) => {
+    Object.entries((data && data.seances) || {}).forEach(([sid, s]) => {
+      if (!s || s.itemId !== itemId || s.eleveId !== eleveId) return;
+      if (s.paiement || s.statut === "annulee") return;
+      if (typeof ancienTarif === "number" && s.prix !== ancienTarif) return;
+      if (depuis && s.date.slice(0, 10) < depuis) return;
+      out.push({ id: sid, mois: id, ...s });
+    });
+  });
+  return out.sort((a, b) => (a.date < b.date ? -1 : 1));
+}
+
+// Applique `prix` aux séances données (voir seancesATarifer) ; mêmes recalculs que modifierSeance.
+export function appliquerTarif(docs, seances, prix) {
+  if (!(typeof prix === "number" && prix >= 0)) throw new Error("Prix invalide");
+  const changes = {};
+  seances.forEach((s) => {
+    Object.entries(modifierSeance(docs, s.mois, s.id, { prix })).forEach(([m, p]) => addChanges(changes, m, p));
+  });
+  return changes;
 }
 
 // Élèves d'un poste (copie triée par nom, actifs d'abord).
