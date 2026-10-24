@@ -519,3 +519,26 @@ describe("saisie rapide : séances passées à traiter", () => {
     assert.deepEqual(marquerFaites(docs, cibles), {});
   });
 });
+
+describe("bascule faite / pas faite", () => {
+  test("à tout moment, même payée : le paiement et l'encaissé sont gardés", () => {
+    const docs = { "2026-10": empty() };
+    ajouterSeance(docs, "a", seance("2026-10-05T18:00", 25, { statut: "faite" }));
+    payerSeance(docs, "2026-10", "a", "especes", "2026-10-05");
+    modifierSeance(docs, "2026-10", "a", { statut: "prevue" });
+    assert.equal(docs["2026-10"].seances.a.statut, "prevue");
+    assert.deepEqual(docs["2026-10"].seances.a.paiement, { mode: "especes", date: "2026-10-05" });
+    assert.deepEqual([docs["2026-10"].values[ETU].amount, docs["2026-10"].values[ETU].receivedCash, docs["2026-10"].values[ETU].aVenir], [25, 25, 0]);
+    modifierSeance(docs, "2026-10", "a", { statut: "faite" });
+    assert.equal(docs["2026-10"].seances.a.statut, "faite");
+  });
+
+  test("séance passée remise « pas faite » : de nouveau dans la zone À traiter", () => {
+    const docs = { "2026-10": empty() };
+    ajouterSeance(docs, "a", seance("2026-10-05T18:00", 25, { statut: "faite" }));
+    payerSeance(docs, "2026-10", "a", "virement", "2026-10-05");
+    assert.deepEqual(seancesATraiter(docs["2026-10"], "2026-10", [], ETU, "2026-10-24T12:00"), []);
+    modifierSeance(docs, "2026-10", "a", { statut: "prevue" });
+    assert.deepEqual(seancesATraiter(docs["2026-10"], "2026-10", [], ETU, "2026-10-24T12:00").map((s) => s.id), ["a"]);
+  });
+});
