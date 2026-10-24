@@ -1371,21 +1371,18 @@ function renderExpenseGroups() {
 
 // Ligne de dépense (les revenus passent par buildIncomeRow).
 function buildSuiviRow(item) {
+  if (isShared(item)) return buildSharedBlock(item);
   const current = () => monthData.values[item.id] || { amount: 0, paid: false };
   const v0 = current();
-  const shared = isShared(item);
   const div = document.createElement("div");
   div.className = "row" + (isReserve(item) ? " poste-reserve" : "");
   div.innerHTML = `
     <input type="checkbox" class="paid-check" ${v0.paid ? "checked" : ""} title="Payé" />
-    <span class="label-text">${escapeHtml(item.label)}${reserveTagHtml(item)}${sharedTagHtml(item)}</span>
+    <span class="label-text">${escapeHtml(item.label)}${reserveTagHtml(item)}</span>
     <input type="number" class="amount-input" value="${v0.amount}" step="0.01" />
   `;
   const amountInput = div.querySelector(".amount-input");
   const paidCheck = div.querySelector(".paid-check");
-
-  // Les handlers préservent les champs additionnels (montantTotal, remboursementRecu pour
-  // une dépense partagée) via {...c, ...} au lieu de reconstruire l'objet from scratch.
   amountInput.addEventListener("input", () => {
     const c = current();
     markChanged(setItemValue(monthData, item.id, { ...c, amount: parseFloat(amountInput.value) || 0 }));
@@ -1398,39 +1395,79 @@ function buildSuiviRow(item) {
     renderTotals();
     scheduleSave();
   });
-  if (!shared) return div;
+  return div;
+}
 
-  // Dépense partagée : sous-ligne pour le montant total réellement débité du compte, et le
-  // suivi du remboursement de l'autre part — indépendant de la case "Payé" ci-dessus, qui ne
-  // concerne que le prélèvement total lui-même.
-  const block = el("div", "expense-block");
-  block.appendChild(div);
-  const sub = document.createElement("div");
-  sub.className = "shared-sub";
-  const total0 = v0.montantTotal != null ? v0.montantTotal : v0.amount * 2;
-  sub.innerHTML = `
-    <span class="shared-lbl">total débité</span>
-    <input type="number" class="shared-total-input" value="${total0}" step="0.01" />
-    <label class="shared-remb">
-      <input type="checkbox" class="shared-remb-check" ${v0.remboursementRecu ? "checked" : ""} />
-      remboursement reçu
-    </label>
-  `;
-  const totalInput = sub.querySelector(".shared-total-input");
-  const rembCheck = sub.querySelector(".shared-remb-check");
-  totalInput.addEventListener("input", () => {
-    const c = current();
-    markChanged(setItemValue(monthData, item.id, { ...c, montantTotal: parseFloat(totalInput.value) || 0 }));
+// Interrupteur générique (même style que « Faite » des séances).
+function switchBtn(label, on, title, onChange) {
+  const b = el("button", "fait-toggle" + (on ? " on" : ""),
+    `<span class="fait-track"><span class="fait-knob"></span></span><span class="fait-label">${label}</span>`);
+  b.type = "button";
+  b.setAttribute("role", "switch");
+  b.setAttribute("aria-checked", String(on));
+  if (title) b.title = title;
+  b.addEventListener("click", () => {
+    on = !on;
+    b.classList.toggle("on", on);
+    b.setAttribute("aria-checked", String(on));
+    onChange(on);
+  });
+  return b;
+}
+
+// Dépense partagée : le compte est débité du montant TOTAL, une autre personne rembourse sa
+// part en dehors de l'appli. Carte qui nomme chaque chiffre : ma part (montant de la ligne,
+// seul compté dans les dépenses), total prélevé, part de l'autre ; et deux états explicites :
+// prélèvement effectué (`paid`), remboursement reçu (`remboursementRecu`).
+function buildSharedBlock(item) {
+  const current = () => monthData.values[item.id] || { amount: 0, paid: false };
+  const v0 = current();
+  const totalOf = (v) => (v.montantTotal != null ? v.montantTotal : (v.amount || 0) * 2);
+  const block = el("div", "expense-block poste-card shared-card");
+  const row = el("div", "row");
+  row.innerHTML =
+    `<span class="sx-icon" aria-hidden="true">🤝</span>` +
+    `<span class="label-text">${escapeHtml(item.label)}${sharedTagHtml(item)}<small class="part-hint">ma part</small></span>` +
+    `<input type="number" class="amount-input" value="${v0.amount}" step="0.01" aria-label="Ma part" title="Ma part : seul ce montant compte dans mes dépenses" />`;
+  const stats = el("div", "sx-stats sx-stats-2",
+    `<div class="sx-stat"><span>Total prélevé</span>` +
+      `<span class="sx-euro shared-total"><input type="number" class="shared-total-input" step="0.01" value="${totalOf(v0)}" aria-label="Total prélevé sur le compte" /><i>€</i></span></div>` +
+    `<div class="sx-stat"><span>Part de l'autre</span><b class="sh-autre"></b><small class="sh-autre-note"></small></div>`);
+  const states = el("div", "shared-states");
+  const expl = el("p", "shared-expl");
+  block.append(row, stats, states, expl);
+
+  const amountInput = row.querySelector(".amount-input");
+  const totalInput = stats.querySelector(".shared-total-input");
+  // Chiffres et phrase d'explication, recalculés en direct.
+  const show = () => {
+    const v = current();
+    const part = v.amount || 0;
+    const total = totalOf(v);
+    const autre = Math.max(0, total - part);
+    stats.querySelector(".sh-autre").textContent = euros(autre);
+    stats.querySelector(".sh-autre-note").textContent = v.remboursementRecu ? "remboursée ✓" : "à te rembourser";
+    expl.innerHTML =
+      `Le compte est débité de <b>${euros(total)}</b>` +
+      (autre > 0 ? ` ; l'autre personne ${v.remboursementRecu ? "t'a remboursé" : "doit te rembourser"} <b>${euros(autre)}</b>` : "") +
+      `. Seule ta part (<b>${euros(part)}</b>) compte dans tes dépenses.`;
+    remb.querySelector(".fait-label").textContent = `Remboursement reçu · ${euros(autre)}`;
+    block.classList.toggle("is-full", !!v.paid && (!!v.remboursementRecu || autre === 0));
+  };
+  const save = (patch) => {
+    markChanged(setItemValue(monthData, item.id, { ...current(), ...patch }));
+    show();
     renderTotals();
     scheduleSave();
-  });
-  rembCheck.addEventListener("change", () => {
-    const c = current();
-    markChanged(setItemValue(monthData, item.id, { ...c, remboursementRecu: rembCheck.checked }));
-    renderTotals();
-    scheduleSave();
-  });
-  block.appendChild(sub);
+  };
+  states.appendChild(switchBtn("Prélèvement effectué", !!v0.paid,
+    "Le montant total a été prélevé sur le compte", (on) => save({ paid: on })));
+  const remb = switchBtn("Remboursement reçu", !!v0.remboursementRecu,
+    "L'autre personne m'a remboursé sa part", (on) => save({ remboursementRecu: on }));
+  states.appendChild(remb);
+  amountInput.addEventListener("input", () => save({ amount: parseFloat(amountInput.value) || 0 }));
+  totalInput.addEventListener("input", () => save({ montantTotal: parseFloat(totalInput.value) || 0 }));
+  show();
   return block;
 }
 
