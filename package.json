@@ -1,0 +1,9 @@
+{
+  "name": "gestion-budget",
+  "private": true,
+  "type": "module",
+  "description": "Appli web de budget (JS pur, sans build). Ce fichier ne sert qu'aux tests.",
+  "scripts": {
+    "test": "node --test \"tests/**/*.test.js\""
+  }
+}
