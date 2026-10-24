@@ -840,6 +840,14 @@ function seanceRow(item, s, mois, arriere) {
       else row.appendChild(seanceForm(item, { ...s, mois }));
     });
   }
+  // Saisie erronée (faute de frappe, doublon…) : la séance disparaît complètement, même
+  // annulée. Une séance payée doit d'abord perdre son paiement.
+  if (!s.paiement) {
+    btn("Supprimer", "danger", () => {
+      if (!confirm(`Supprimer définitivement la séance du ${seanceDateLabel(s.date)} (${euros(s.prix)}) ?\n\nElle disparaîtra de la liste et des totaux.`)) return;
+      runSeanceOp("supprimer", { mois }, (docs) => supprimerSeance(docs, mois, s.id));
+    });
+  }
   row.appendChild(actions);
   return row;
 }
@@ -856,8 +864,7 @@ function seanceForm(item, edit) {
     `<input type="number" name="prix" step="0.01" min="0" placeholder="Prix" required value="${edit ? edit.prix : ""}" />` +
     (edit ? `<select name="statut">${[["prevue", "prévue"], ["faite", "faite"], ["annulee", "annulée"]].map(([k, l]) =>
       `<option value="${k}"${edit.statut === k ? " selected" : ""}>${l}</option>`).join("")}</select>` : "") +
-    `<button type="submit" class="btn small primary">${edit ? "Enregistrer" : "Ajouter"}</button>` +
-    (edit && !edit.paiement ? `<button type="button" class="btn small danger seance-del">Supprimer</button>` : "");
+    `<button type="submit" class="btn small primary">${edit ? "Enregistrer" : "Ajouter"}</button>`;
   // Le tarif de l'élève est proposé comme prix (modifiable).
   form.elements.eleve.addEventListener("change", () => {
     const e = (item.eleves || []).find((x) => x.id === form.elements.eleve.value);
@@ -879,13 +886,6 @@ function seanceForm(item, edit) {
       runSeanceOp("ajouter", { seance }, (docs) => ajouterSeance(docs, uid(), seance));
     }
   });
-  const del = form.querySelector(".seance-del");
-  if (del) {
-    del.addEventListener("click", () => {
-      if (!confirm("Supprimer cette séance (saisie erronée) ? Pour une séance qui n'a pas eu lieu, utiliser plutôt « annulée ».")) return;
-      runSeanceOp("supprimer", { mois: edit.mois }, (docs) => supprimerSeance(docs, edit.mois, edit.id));
-    });
-  }
   return form;
 }
 
