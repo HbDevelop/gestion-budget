@@ -1718,13 +1718,14 @@ function gridRow(item, ids, monthsByI, opts) {
     row += `<span class="cell-label poste-label${isReserve(item) ? " poste-reserve" : ""}" title="${escapeAttr(item.label)}">${escapeHtml(item.label)}${reserveTagHtml(item)}${sharedTagHtml(item)}</span>`;
   }
   row += `</td>`;
-  ids.forEach((id) => {
+  ids.forEach((id, i) => {
     const data = monthsByI[id];
     const v = data && data.values && data.values[item.id];
     const amount = v ? v.amount : 0;
     if (opts.editable && isSeancesItem(item) && hasSeances(data, item.id)) {
       // Mois avec des séances : montant calculé, modifiable seulement via les séances (Suivi).
-      row += `<td class="calc-cell" title="Calculé à partir des séances du mois">${euros(amount)}</td>`;
+      // Même gabarit que les champs voisins, avec une étiquette au survol / au toucher.
+      row += `<td>${calcBox(item, data, amount, i >= ids.length - 2)}</td>`;
     } else if (opts.editable) {
       row += `<td><input class="forecast-input" type="number" step="0.01" value="${amount}"
         data-month-id-attr="${id}" data-item-id="${item.id}" /></td>`;
@@ -1733,6 +1734,23 @@ function gridRow(item, ids, monthsByI, opts) {
     }
   });
   return row + "</tr>";
+}
+
+// Case « montant calculé » d'un poste à séances dans Prévisions : même taille que les champs
+// de la grille, bordure pointillée + 🔁, et une étiquette qui détaille les séances du mois.
+// `aDroite` : dernières colonnes, l'étiquette s'aligne à droite pour ne pas sortir du tableau.
+function calcBox(item, data, amount, aDroite) {
+  const ss = seancesOfItem(data, item.id);
+  const nb = (st) => ss.filter((s) => s.statut === st).length;
+  const actives = ss.length - nb("annulee");
+  const detail = [[nb("faite"), "faite"], [nb("prevue"), "prévue"], [nb("annulee"), "annulée"]]
+    .filter(([n]) => n).map(([n, l]) => `${n} ${l}${n > 1 ? "s" : ""}`).join(" · ");
+  return `<div class="calc-box${aDroite ? " calc-right" : ""}" tabindex="0" aria-label="${escapeAttr(`${euros(amount)}, calculé à partir de ${actives} séance${actives > 1 ? "s" : ""}`)}">` +
+    `<span class="calc-val">${amount}</span><span class="calc-ico" aria-hidden="true">🔁</span>` +
+    `<span class="calc-tip" role="tooltip"><b>Calculé à partir des séances</b>` +
+    `<span>${actives} séance${actives > 1 ? "s" : ""} · ${euros(amount)}</span>` +
+    (detail ? `<span class="calc-tip-detail">${detail}</span>` : "") +
+    `<small>Modifiable dans le Suivi → journal des séances</small></span></div>`;
 }
 
 function gridTotalRow(label, ids, monthsByI, getValue, strong, key) {
