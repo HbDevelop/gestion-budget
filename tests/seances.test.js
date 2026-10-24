@@ -6,7 +6,7 @@ import {
   isSeancesItem, monthOfDate, seancesOfItem, seancesValue, recomputeItem, monthsNeeded,
   ajouterSeance, modifierSeance, payerSeance, annulerPaiement, supprimerSeance, arrieres, elevesOf,
   seancesATarifer, appliquerTarif, datesRecurrentes, programmerSeances, seancesSerie, supprimerSeances,
-  MAX_PROGRAMMATION, seancesFutures, seancesATraiter, payerEtFaire, marquerFaites
+  MAX_PROGRAMMATION, seancesFutures, seancesATraiter, marquerFaites
 } from "../seances.js";
 import { computeTotals, saveMonthChanges, monthPath } from "../budget-core.js";
 import { createFakeFirestore } from "./helpers/fake-firestore.js";
@@ -150,7 +150,7 @@ describe("opérations", () => {
 
   test("règles : pas de paiement double, pas d'annulation ni de suppression d'une séance payée", () => {
     const docs = { "2026-10": empty() };
-    ajouterSeance(docs, "s1", seance("2026-10-07T18:00", 25));
+    ajouterSeance(docs, "s1", seance("2026-10-07T18:00", 25, { statut: "faite" }));
     payerSeance(docs, "2026-10", "s1", "virement", "2026-10-08");
     assert.throws(() => payerSeance(docs, "2026-10", "s1", "virement", "2026-10-08"), /déjà payée/);
     assert.throws(() => modifierSeance(docs, "2026-10", "s1", { statut: "annulee" }), /paiement/);
@@ -384,8 +384,9 @@ describe("programmation automatique", () => {
     let n = 0;
     const dates = datesRecurrentes({ jours: [2], heure: "18:00", du: "2026-10-20", au: "2026-11-17" });
     programmerSeances(docs, { itemId: ETU, eleveId: "lina", prix: 30, serieId: "s1" }, dates, () => `p${++n}`);
-    // p1 = 20/10 (faite), p2 = 27/10 (payée), p3 = 03/11, p4 = 10/11 (annulée), p5 = 17/11
+    // p1 = 20/10 (faite), p2 = 27/10 (faite et payée), p3 = 03/11, p4 = 10/11 (annulée), p5 = 17/11
     modifierSeance(docs, "2026-10", "p1", { statut: "faite" });
+    modifierSeance(docs, "2026-10", "p2", { statut: "faite" });
     payerSeance(docs, "2026-10", "p2", "especes", "2026-10-27");
     modifierSeance(docs, "2026-11", "p4", { statut: "annulee" });
     ajouterSeance(docs, "autre", seance("2026-11-24T18:00", 30));
@@ -490,23 +491,24 @@ describe("saisie rapide : séances passées à traiter", () => {
     assert.deepEqual(seancesATraiter(empty(), "2026-10", [], ETU, "2026-10-24T19:00"), []);
   });
 
-  test("payer en un geste : une séance prévue passe aussi à faite ; reste dû et encaissé à jour", () => {
+  test("payer : la séance doit d'abord être faite ; reste dû et encaissé à jour", () => {
     const docs = build();
-    const ch = payerEtFaire(docs, "2026-10", "aConf", "virement", "2026-10-24");
-    const s = docs["2026-10"].seances.aConf;
-    assert.equal(s.statut, "faite");
-    assert.deepEqual(s.paiement, { mode: "virement", date: "2026-10-24" });
+    // Séance encore prévue : paiement refusé, rien ne change.
+    assert.throws(() => payerSeance(docs, "2026-10", "aConf", "virement", "2026-10-24"), /faite/);
+    assert.equal(docs["2026-10"].seances.aConf.paiement, null);
+    assert.equal(docs["2026-10"].paiementsSeances.aConf, undefined);
+    // Marquée faite, puis payée.
+    modifierSeance(docs, "2026-10", "aConf", { statut: "faite" });
+    const ch = payerSeance(docs, "2026-10", "aConf", "virement", "2026-10-24");
+    assert.deepEqual(docs["2026-10"].seances.aConf.paiement, { mode: "virement", date: "2026-10-24" });
     assert.equal(docs["2026-10"].paiementsSeances.aConf.prix, 25);
     assert.deepEqual(Object.keys(ch), ["2026-10"]);
-    // Séance déjà faite : seul le paiement change.
-    payerEtFaire(docs, "2026-10", "nonPaye", "especes", "2026-10-24");
-    assert.equal(docs["2026-10"].seances.nonPaye.statut, "faite");
+    payerSeance(docs, "2026-10", "nonPaye", "especes", "2026-10-24");
     assert.equal(docs["2026-10"].values[ETU].receivedCash, 55);
-    // Impayé de septembre payé aujourd'hui : compté en octobre.
-    const ch2 = payerEtFaire(docs, "2026-09", "sept", "virement", "2026-10-24");
+    // Impayé de septembre (fait) payé aujourd'hui : compté en octobre.
+    const ch2 = payerSeance(docs, "2026-09", "sept", "virement", "2026-10-24");
     assert.deepEqual(Object.keys(ch2).sort(), ["2026-09", "2026-10"]);
     assert.equal(docs["2026-10"].paiementsSeances.sept.seanceMois, "2026-09");
-    assert.throws(() => payerEtFaire(docs, "2026-10", "fini", "virement", "2026-10-24"), /déjà payée/);
   });
 
   test("tout marquer fait : seulement les séances encore prévues", () => {
@@ -521,24 +523,36 @@ describe("saisie rapide : séances passées à traiter", () => {
 });
 
 describe("bascule faite / pas faite", () => {
-  test("à tout moment, même payée : le paiement et l'encaissé sont gardés", () => {
+  test("non payée : faite <-> pas faite à tout moment", () => {
     const docs = { "2026-10": empty() };
     ajouterSeance(docs, "a", seance("2026-10-05T18:00", 25, { statut: "faite" }));
-    payerSeance(docs, "2026-10", "a", "especes", "2026-10-05");
     modifierSeance(docs, "2026-10", "a", { statut: "prevue" });
     assert.equal(docs["2026-10"].seances.a.statut, "prevue");
-    assert.deepEqual(docs["2026-10"].seances.a.paiement, { mode: "especes", date: "2026-10-05" });
-    assert.deepEqual([docs["2026-10"].values[ETU].amount, docs["2026-10"].values[ETU].receivedCash, docs["2026-10"].values[ETU].aVenir], [25, 25, 0]);
+    assert.equal(docs["2026-10"].values[ETU].aVenir, 25);
     modifierSeance(docs, "2026-10", "a", { statut: "faite" });
     assert.equal(docs["2026-10"].seances.a.statut, "faite");
   });
 
-  test("séance passée remise « pas faite » : de nouveau dans la zone À traiter", () => {
+  test("payée : impossible de la remettre « pas faite » sans annuler le paiement", () => {
     const docs = { "2026-10": empty() };
     ajouterSeance(docs, "a", seance("2026-10-05T18:00", 25, { statut: "faite" }));
-    payerSeance(docs, "2026-10", "a", "virement", "2026-10-05");
-    assert.deepEqual(seancesATraiter(docs["2026-10"], "2026-10", [], ETU, "2026-10-24T12:00"), []);
+    payerSeance(docs, "2026-10", "a", "especes", "2026-10-05");
+    assert.throws(() => modifierSeance(docs, "2026-10", "a", { statut: "prevue" }), /annuler d'abord le paiement/);
+    assert.equal(docs["2026-10"].seances.a.statut, "faite");
+    // Les autres modifications restent possibles (prix, heure…).
+    modifierSeance(docs, "2026-10", "a", { date: "2026-10-05T17:00" });
+    annulerPaiement(docs, "2026-10", "a");
     modifierSeance(docs, "2026-10", "a", { statut: "prevue" });
     assert.deepEqual(seancesATraiter(docs["2026-10"], "2026-10", [], ETU, "2026-10-24T12:00").map((s) => s.id), ["a"]);
+  });
+
+  test("ancienne donnée payée mais restée « prévue » : peut être marquée faite", () => {
+    const docs = { "2026-10": empty() };
+    ajouterSeance(docs, "a", seance("2026-10-05T18:00", 25, { statut: "faite" }));
+    payerSeance(docs, "2026-10", "a", "especes", "2026-10-05");
+    docs["2026-10"].seances.a.statut = "prevue";   // état possible avant cette règle
+    modifierSeance(docs, "2026-10", "a", { prix: 30 });
+    modifierSeance(docs, "2026-10", "a", { statut: "faite" });
+    assert.equal(docs["2026-10"].seances.a.statut, "faite");
   });
 });

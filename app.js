@@ -7,7 +7,7 @@ import {
   getFirestore, doc, getDoc as fbGetDoc, setDoc as fbSetDoc, updateDoc as fbUpdateDoc, deleteField,
   collection, getDocs as fbGetDocs, query, orderBy
 } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
-import { isDemoEmail, createDemoStore, DEMO_LABELS } from "./demo.js?v=10";
+import { isDemoEmail, createDemoStore, DEMO_LABELS } from "./demo.js?v=11";
 import {
   monthId, addMonths, isActiveAt, inScope, isShared, receivedOf, cashOf, virementOf,
   withIncomeAmount, sumBankBalances, bankFor, cashFor, computeTotals, cloneForNewMonth,
@@ -18,8 +18,8 @@ import {
   isSeancesItem, hasSeances, seancesOfItem, monthOfDate, monthsNeeded, ajouterSeance, modifierSeance,
   payerSeance, annulerPaiement, supprimerSeance, arrieres, elevesOf, seancesATarifer, appliquerTarif,
   datesRecurrentes, programmerSeances, seancesSerie, supprimerSeances, seancesFutures,
-  seancesATraiter, payerEtFaire, marquerFaites
-} from "./seances.js?v=6";
+  seancesATraiter, marquerFaites
+} from "./seances.js?v=7";
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -877,17 +877,14 @@ function seanceRow(item, s, mois, mode = "courant") {
   const [d, t] = s.date.split("T");
   const [y, m, j] = d.split("-").map(Number);
   const jour = new Date(y, m - 1, j).toLocaleDateString("fr-FR", { weekday: "short" });
-  // Pastille de statut cliquable : bascule faite <-> pas faite, à tout moment (même passée ou
-  // payée). Pas pour une séance annulée (« Rétablir ») ni d'un mois suivant (pas encore eue).
+  // Faite / pas faite : interrupteur (faiteToggle) pour les séances du mois et les impayés ;
+  // simple pastille pour une séance annulée ou d'un mois suivant (pas encore eue).
   const basculable = etat !== "annulee" && mode !== "avenir";
-  const chipHtml = (cls, label, title) => basculable
-    ? `<button type="button" class="chip chip-toggle ${cls}" title="${title}">${label}</button>`
-    : `<span class="chip ${cls}">${label}</span>`;
-  const chip = {
+  const chip = basculable ? "" : {
     annulee: `<span class="chip chip-annulee">Annulée</span>`,
-    faite: chipHtml("chip-faite", "✓ Faite", "Cliquer pour marquer non faite"),
-    confirmer: chipHtml("chip-confirmer", "À confirmer", "Cliquer pour marquer faite"),
-    prevue: chipHtml("chip-prevue", "Prévue", "Cliquer pour marquer faite")
+    faite: `<span class="chip chip-faite">✓ Faite</span>`,
+    confirmer: `<span class="chip chip-confirmer">À confirmer</span>`,
+    prevue: `<span class="chip chip-prevue">Prévue</span>`
   }[etat];
   const paye = s.paiement
     ? `<span class="chip chip-payee">${s.paiement.mode === "especes" ? "💶 Espèces" : "💳 Virement"} · ${shortDate(s.paiement.date)}</span>`
@@ -910,19 +907,19 @@ function seanceRow(item, s, mois, mode = "courant") {
     return b;
   };
   const patch = (p) => runSeanceOp("modifier", { mois, patch: p, paiement: s.paiement }, (docs) => modifierSeance(docs, mois, s.id, p));
-  const basculer = () => patch({ statut: s.statut === "faite" ? "prevue" : "faite" });
-  const chipBtn = card.querySelector(".chip-toggle");
-  if (chipBtn) chipBtn.addEventListener("click", basculer);
-  if (basculable && s.statut === "faite") btn(menu, "Marquer non faite", "sx-menu-item", basculer);
+  if (basculable) actions.appendChild(faiteToggle(s, () => patch({ statut: s.statut === "faite" ? "prevue" : "faite" })));
 
   if (s.statut === "annulee") {
     btn(actions, "↺ Rétablir", "sx-btn", () => patch({ statut: "prevue" }));
   } else {
     // Mois suivants : séance pas encore eue, ni « faite » ni paiement proposés (seulement le menu).
     const aVenir = mode === "avenir";
-    if (s.statut === "prevue" && !aVenir) btn(actions, "✓ Faite", "sx-btn", () => patch({ statut: "faite" }));
     if (!s.paiement && aVenir) {
       if (s.statut === "prevue") btn(menu, "Annuler la séance", "sx-menu-item", () => patch({ statut: "annulee" }));
+    } else if (!s.paiement && s.statut !== "faite") {
+      // Le paiement n'est possible qu'une fois la séance marquée faite.
+      actions.appendChild(el("span", "pay-hint", "Marquer faite pour enregistrer le paiement"));
+      btn(menu, "Annuler la séance", "sx-menu-item", () => patch({ statut: "annulee" }));
     } else if (!s.paiement) {
       const pay = el("div", "sx-pay");
       const date = el("input", "sx-paydate");
@@ -934,7 +931,6 @@ function seanceRow(item, s, mois, mode = "courant") {
       btn(pay, "💳 Virement", "sx-btn sx-btn-pay", () => payer("virement"));
       btn(pay, "💶 Espèces", "sx-btn sx-btn-pay", () => payer("especes"));
       actions.appendChild(pay);
-      if (s.statut === "prevue") btn(menu, "Annuler la séance", "sx-menu-item", () => patch({ statut: "annulee" }));
     } else {
       btn(menu, "Annuler le paiement", "sx-menu-item", () => {
         if (!confirm("Annuler le paiement de cette séance ?")) return;
@@ -979,14 +975,33 @@ function seanceRow(item, s, mois, mode = "courant") {
   return card;
 }
 
+// Interrupteur « Faite » d'une séance (journal et zone « À traiter »). Obligatoire avant tout
+// paiement ; verrouillé une fois la séance payée (annuler d'abord le paiement).
+function faiteToggle(s, onToggle) {
+  const done = s.statut === "faite";
+  const locked = done && !!s.paiement;
+  const b = el("button", "fait-toggle" + (done ? " on" : "") + (locked ? " locked" : ""),
+    `<span class="fait-track"><span class="fait-knob"></span></span><span class="fait-label">Faite</span>`);
+  b.type = "button";
+  b.setAttribute("role", "switch");
+  b.setAttribute("aria-checked", String(done));
+  b.title = locked ? "Séance payée : annuler d'abord le paiement (menu ⋯) pour la marquer non faite"
+    : done ? "Séance faite — cliquer pour la marquer non faite" : "Marquer la séance faite";
+  b.addEventListener("click", () => {
+    if (locked) { alert(b.title); return; }
+    onToggle();
+  });
+  return b;
+}
+
 // Date et heure locales actuelles, au format des séances ("AAAA-MM-JJTHH:MM").
 function maintenantStr() {
   const d = new Date();
   return `${todayStr()}T${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
 }
 
-// Zone « À traiter » (journal fermé) : séances passées pas encore faites ou pas encore payées,
-// à valider en un clic. Payer (daté d'aujourd'hui) marque aussi la séance faite.
+// Zone « À traiter » (journal fermé) : séances passées pas encore faites ou pas encore payées.
+// Interrupteur « Faite », puis paiement en un clic (daté d'aujourd'hui) une fois faite.
 const A_TRAITER_MAX = 5;
 function aTraiterZone(item, arr) {
   if (currentMonthId !== monthId(new Date())) return null;
@@ -1021,22 +1036,20 @@ function aTraiterZone(item, arr) {
       eleveAvatar(item, s.eleveId) +
       `<div class="sx-todo-info"><b>${escapeHtml(nom)}</b><small>${seanceDateLabel(s.date)}` +
       (s.mois !== currentMonthId ? ` (${monthLabelShort(s.mois)})` : "") + ` · ${euros(s.prix)}</small></div>` +
-      (s.statut === "prevue" ? `<span class="chip chip-confirmer">À confirmer${s.paiement ? " · payée" : ""}</span>` : `<span class="chip chip-due">Non payée</span>`);
+      (s.statut === "faite" && !s.paiement ? `<span class="chip chip-due">Non payée</span>` : "<span></span>");
     const actions = el("div", "sx-todo-actions");
     const statut = (st) => runSeanceOp("modifier", { mois: s.mois, patch: { statut: st } }, (docs) => modifierSeance(docs, s.mois, s.id, { statut: st }));
-    if (s.statut === "prevue") btn(actions, "✓ Faite", "sx-btn", "Séance faite (pas encore payée)", () => statut("faite"));
+    actions.appendChild(faiteToggle(s, () => statut(s.statut === "faite" ? "prevue" : "faite")));
     const payer = (mode) => runSeanceOp("payer", { mois: s.mois, date: todayStr() }, (docs) => {
-      const ch = payerEtFaire(docs, s.mois, s.id, mode, todayStr());
+      const ch = payerSeance(docs, s.mois, s.id, mode, todayStr());
       seancesFlash = { itemId: item.id, html: `✓ ${escapeHtml(nom)} · ${euros(s.prix)} encaissés ${mode === "especes" ? "en espèces 💶" : "par virement 💳"}.` };
       return ch;
     });
-    // Déjà payée (puis remise « pas faite ») : pas de second paiement proposé.
-    if (!s.paiement) {
+    // Paiement seulement une fois la séance faite (et pas déjà payée).
+    if (s.statut === "faite" && !s.paiement) {
       btn(actions, "💳", "sx-btn sx-btn-pay sx-todo-pay", "Payée par virement aujourd'hui", () => payer("virement"));
       btn(actions, "💶", "sx-btn sx-btn-pay sx-todo-pay", "Payée en espèces aujourd'hui", () => payer("especes"));
     }
-    // Action rare : remettre une séance faite à « pas faite » (icône discrète, en dernier).
-    if (s.statut === "faite") btn(actions, "↺", "sx-todo-undo", "Pas faite : remettre la séance à confirmer", () => statut("prevue"));
     row.appendChild(actions);
     zone.appendChild(row);
   });
