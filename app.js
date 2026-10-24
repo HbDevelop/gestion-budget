@@ -591,48 +591,61 @@ function renderIncome() {
 // permet le partiel (ex. l'Etude payée en plusieurs fois dans le mois).
 function buildIncomeRow(item) {
   const current = () => monthData.values[item.id] || { amount: 0, paid: false };
-  const pct = (amt, rec) => (amt > 0 ? Math.max(0, Math.min(100, (rec / amt) * 100)) : 0);
   const v0 = current();
-  const rec0 = receivedOf(v0);
-  const full0 = v0.amount > 0 && rec0 >= v0.amount;
+  const full0 = v0.amount > 0 && receivedOf(v0) >= v0.amount;
 
-  const block = el("div", "income-block");
+  // Carte légère, même langage que le poste à séances (Etude) : ligne principale, deux chiffres
+  // compacts (encaissé avec virement / espèces, reste à recevoir), champs virement / espèces
+  // et barre fine bicolore.
+  const block = el("div", "income-block poste-card");
   const row = el("div", "row income-row" + (isReserve(item) ? " poste-reserve" : ""));
   row.innerHTML =
     `<input type="checkbox" class="paid-check" ${full0 ? "checked" : ""} title="Tout reçu" />` +
     `<span class="label-text">${escapeHtml(item.label)}${reserveTagHtml(item)}</span>` +
     `<input type="number" class="amount-input" value="${v0.amount}" step="0.01" />`;
-
+  const stats = el("div", "sx-stats sx-stats-2",
+    `<div class="sx-stat st-recu-box"><span>Encaissé</span><b class="st-recu"></b><small class="st-sur"></small></div>` +
+    `<div class="sx-stat st-reste-box"><span>À recevoir</span><b class="st-reste"></b><small class="st-note"></small></div>`);
   // L'encaissé est réparti entre virement (arrive sur le compte) et espèces (en main).
-  const recu = el("div", "income-recu" + (full0 ? " done" : ""));
+  const recu = el("div", "income-recu");
   recu.innerHTML =
     `<span class="recu-lbl">virement</span>` +
     `<input type="number" class="recu-input recu-vir" value="${virementOf(v0)}" step="0.01" aria-label="Montant encaissé par virement" />` +
     `<span class="recu-lbl">espèces</span>` +
-    `<input type="number" class="recu-input recu-cash" value="${cashOf(v0)}" step="0.01" aria-label="Montant encaissé en espèces" />` +
-    `<span class="recu-of">= <b class="recu-total">${euros(rec0)}</b> sur <b class="recu-amt">${euros(v0.amount)}</b></span>` +
-    `<span class="recu-bar"><i style="width:${pct(v0.amount, rec0)}%"></i></span>`;
-  block.append(row, recu);
+    `<input type="number" class="recu-input recu-cash" value="${cashOf(v0)}" step="0.01" aria-label="Montant encaissé en espèces" />`;
+  const bar = el("div", "sx-bar", `<i class="sx-bar-vir"></i><i class="sx-bar-cash"></i>`);
+  block.append(row, stats, recu, bar);
+
+  // Chiffres, barre et état « tout reçu » à partir d'une valeur.
+  const show = (v) => {
+    const amt = v.amount || 0;
+    const rec = receivedOf(v);
+    const reste = Math.max(0, amt - rec);
+    const full = amt > 0 && rec >= amt;
+    const base = Math.max(amt, rec, 1);
+    const part = (x) => Math.max(0, Math.min(100, (x / base) * 100)).toFixed(1) + "%";
+    stats.querySelector(".st-recu").textContent = euros(rec);
+    stats.querySelector(".st-sur").textContent = `sur ${euros(amt)}`;
+    stats.querySelector(".st-recu-box").classList.toggle("sx-stat-ok", rec > 0);
+    stats.querySelector(".st-reste").textContent = euros(reste);
+    stats.querySelector(".st-note").textContent = full ? "tout reçu ✓" : "";
+    stats.querySelector(".st-reste-box").classList.toggle("sx-stat-due", reste > 0);
+    bar.querySelector(".sx-bar-vir").style.width = part(virementOf(v));
+    bar.querySelector(".sx-bar-cash").style.width = part(cashOf(v));
+    block.classList.toggle("is-full", full);
+    return full;
+  };
+  show(v0);
 
   const amountInput = row.querySelector(".amount-input");
   const paidCheck = row.querySelector(".paid-check");
   const virInput = recu.querySelector(".recu-vir");
   const cashInput = recu.querySelector(".recu-cash");
-  const recuTotalEl = recu.querySelector(".recu-total");
-  const recuOfEl = recu.querySelector(".recu-amt");
-  const bar = recu.querySelector(".recu-bar i");
 
-  // Applique la valeur, resynchronise l'affichage (barre, "sur X", case, total), sauvegarde.
+  // Applique la valeur, resynchronise l'affichage (chiffres, barre, case), sauvegarde.
   const commit = (next) => {
     markChanged(setItemValue(monthData, item.id, next));
-    const amt = next.amount || 0;
-    const rec = receivedOf(next);
-    const full = amt > 0 && rec >= amt;
-    recuOfEl.textContent = euros(amt);
-    recuTotalEl.textContent = euros(rec);
-    bar.style.width = pct(amt, rec) + "%";
-    recu.classList.toggle("done", full);
-    paidCheck.checked = full;
+    paidCheck.checked = show(next);
     if (document.activeElement !== virInput) virInput.value = virementOf(next);
     if (document.activeElement !== cashInput) cashInput.value = cashOf(next);
     renderTotals();
@@ -768,28 +781,40 @@ function buildSeancesBlock(item) {
   const arr = arrieresSeances.liste.filter((s) => s.itemId === item.id);
   const arrTotal = arr.reduce((t, s) => t + (s.prix || 0), 0);
   const open = seancesOuverts.has(item.id);
+  const amount = v.amount || 0;
   const recu = receivedOf(v);
-  // Barre : part virement / espèces de l'encaissé, rapportée au prévu (ou à l'encaissé s'il le dépasse).
-  const base = Math.max(v.amount || 0, recu, 1);
-  const pct = (x) => Math.max(0, Math.min(100, (x / base) * 100)).toFixed(1);
+  const full = amount > 0 && aVenir === 0;
+  const aTraiter = currentMonthId === monthId(new Date()) ? seancesATraiter(monthData, currentMonthId, arr, item.id, maintenantStr()) : [];
 
-  const block = el("div", "income-block sx" + (open ? " sx-open" : ""));
-  block.innerHTML =
-    `<div class="sx-head">
-      <div class="sx-title"><span class="sx-icon">🎓</span><div><b>${escapeHtml(item.label)}</b>` +
-      `<small>${actives.length} séance${actives.length > 1 ? "s" : ""} ce mois · paiement à la séance</small></div></div>
-      <button type="button" class="sx-toggle" aria-expanded="${open}">${open ? "Fermer" : "Journal"} <span class="sx-chev">▾</span></button>
-    </div>
-    <div class="sx-kpis">
-      <div class="sx-kpi"><span>Prévu</span><b>${euros(v.amount || 0)}</b></div>
-      <div class="sx-kpi sx-ok"><span>Encaissé</span><b>${euros(recu)}</b>` +
-      (recu ? `<small>💳 ${euros(virementOf(v))} · 💶 ${euros(cashOf(v))}</small>` : "") + `</div>
-      <div class="sx-kpi${aVenir > 0 ? " sx-due" : ""}"><span>Reste dû</span><b>${euros(aVenir)}</b></div>
-    </div>
-    <div class="sx-bar" title="Encaissé : virement ${euros(virementOf(v))}, espèces ${euros(cashOf(v))}">` +
-      `<i class="sx-bar-vir" style="width:${pct(virementOf(v))}%"></i><i class="sx-bar-cash" style="width:${pct(cashOf(v))}%"></i></div>` +
-    (arr.length ? `<div class="sx-alert">⏳ <b>${euros(arrTotal)}</b> à encaisser des mois précédents · ${arr.length} séance${arr.length > 1 ? "s" : ""}</div>` : "");
-  block.querySelector(".sx-toggle").addEventListener("click", () => {
+  // Entre un revenu ordinaire et une carte : léger encadré, mais même colonnes que les autres
+  // revenus (icône à la place de la case, montant prévu aligné sur les champs voisins), puis
+  // trois chiffres compacts, une barre fine virement / espèces et le lien vers le journal.
+  const block = el("div", "income-block poste-card sx" + (open ? " sx-open" : "") + (full ? " is-full" : ""));
+  const row = el("div", "row income-row");
+  row.innerHTML =
+    `<span class="sx-icon" aria-hidden="true">🎓</span>` +
+    `<span class="label-text">${escapeHtml(item.label)}<span class="poste-tag poste-tag-seances">séances</span></span>` +
+    calcBox(item, monthData, amount, true, "Modifiable via le journal des séances");
+  const base = Math.max(amount, recu, 1);
+  const part = (x) => Math.max(0, Math.min(100, (x / base) * 100)).toFixed(1);
+  const faites = seances.filter((s) => s.statut === "faite").length;
+  const stats = el("div", "sx-stats");
+  stats.innerHTML =
+    `<div class="sx-stat sx-stat-ok"><span>Encaissé</span><b>${euros(recu)}</b>` +
+      `<small>💳 ${euros(virementOf(v))} · 💶 ${euros(cashOf(v))}</small></div>` +
+    `<div class="sx-stat${aVenir > 0 ? " sx-stat-due" : ""}"><span>Reste dû</span><b>${euros(aVenir)}</b>` +
+      (full ? `<small>tout est payé ✓</small>` : "") + `</div>` +
+    `<div class="sx-stat"><span>Séances</span><b>${actives.length}</b>` +
+      `<small>${faites} faite${faites > 1 ? "s" : ""}</small></div>`;
+  const bar = el("div", "sx-bar", `<i class="sx-bar-vir" style="width:${part(virementOf(v))}%"></i><i class="sx-bar-cash" style="width:${part(cashOf(v))}%"></i>`);
+  bar.title = `Encaissé ${euros(recu)} sur ${euros(amount)} (virement ${euros(virementOf(v))}, espèces ${euros(cashOf(v))})`;
+  const meta = el("div", "sx-meta");
+  meta.innerHTML =
+    (arr.length ? `<span class="sx-meta-warn">⏳ ${euros(arrTotal)} à encaisser (mois précédents)</span>` : "") +
+    (aTraiter.length && !open ? `<span class="sx-meta-warn">${aTraiter.length} séance${aTraiter.length > 1 ? "s" : ""} à traiter</span>` : "") +
+    `<button type="button" class="sx-link" aria-expanded="${open}">${open ? "Fermer le journal ▴" : "Journal ▸"}</button>`;
+  block.append(row, stats, bar, meta);
+  meta.querySelector(".sx-link").addEventListener("click", () => {
     if (open) seancesOuverts.delete(item.id); else seancesOuverts.add(item.id);
     render();
   });
@@ -969,9 +994,7 @@ function aTraiterZone(item, arr) {
   if (!liste.length) return null;
   const aConfirmer = liste.filter((s) => s.statut === "prevue");
   const zone = el("div", "sx-todo");
-  zone.innerHTML =
-    `<div class="sx-todo-head"><b>À traiter</b><span>${liste.length} séance${liste.length > 1 ? "s" : ""} passée${liste.length > 1 ? "s" : ""}</span></div>`;
-  const head = zone.querySelector(".sx-todo-head");
+  const head = el("div", "sx-todo-head");
   const btn = (parent, label, cls, title, fn) => {
     const b = el("button", cls, label);
     b.type = "button";
@@ -981,7 +1004,8 @@ function aTraiterZone(item, arr) {
     return b;
   };
   if (aConfirmer.length > 1) {
-    btn(head, `✓ Tout marquer fait (${aConfirmer.length})`, "sx-btn sx-todo-all", "Marquer faites toutes les séances passées encore prévues", () => {
+    zone.appendChild(head);
+    btn(head, `✓ Tout marquer fait (${aConfirmer.length})`, "sx-todo-all", "Marquer faites toutes les séances passées encore prévues", () => {
       const seances = aConfirmer.map((s) => ({ id: s.id, mois: s.mois }));
       runSeanceOp("faites", { seances }, (docs) => {
         const ch = marquerFaites(docs, seances);
@@ -1001,7 +1025,6 @@ function aTraiterZone(item, arr) {
     const actions = el("div", "sx-todo-actions");
     const statut = (st) => runSeanceOp("modifier", { mois: s.mois, patch: { statut: st } }, (docs) => modifierSeance(docs, s.mois, s.id, { statut: st }));
     if (s.statut === "prevue") btn(actions, "✓ Faite", "sx-btn", "Séance faite (pas encore payée)", () => statut("faite"));
-    else btn(actions, "↺ Pas faite", "sx-btn", "Remettre la séance à confirmer (pas faite)", () => statut("prevue"));
     const payer = (mode) => runSeanceOp("payer", { mois: s.mois, date: todayStr() }, (docs) => {
       const ch = payerEtFaire(docs, s.mois, s.id, mode, todayStr());
       seancesFlash = { itemId: item.id, html: `✓ ${escapeHtml(nom)} · ${euros(s.prix)} encaissés ${mode === "especes" ? "en espèces 💶" : "par virement 💳"}.` };
@@ -1012,6 +1035,8 @@ function aTraiterZone(item, arr) {
       btn(actions, "💳", "sx-btn sx-btn-pay sx-todo-pay", "Payée par virement aujourd'hui", () => payer("virement"));
       btn(actions, "💶", "sx-btn sx-btn-pay sx-todo-pay", "Payée en espèces aujourd'hui", () => payer("especes"));
     }
+    // Action rare : remettre une séance faite à « pas faite » (icône discrète, en dernier).
+    if (s.statut === "faite") btn(actions, "↺", "sx-todo-undo", "Pas faite : remettre la séance à confirmer", () => statut("prevue"));
     row.appendChild(actions);
     zone.appendChild(row);
   });
@@ -1739,7 +1764,7 @@ function gridRow(item, ids, monthsByI, opts) {
 // Case « montant calculé » d'un poste à séances dans Prévisions : même taille que les champs
 // de la grille, bordure pointillée + 🔁, et une étiquette qui détaille les séances du mois.
 // `aDroite` : dernières colonnes, l'étiquette s'aligne à droite pour ne pas sortir du tableau.
-function calcBox(item, data, amount, aDroite) {
+function calcBox(item, data, amount, aDroite, aide = "Modifiable dans le Suivi → journal des séances") {
   const ss = seancesOfItem(data, item.id);
   const nb = (st) => ss.filter((s) => s.statut === st).length;
   const actives = ss.length - nb("annulee");
@@ -1750,7 +1775,7 @@ function calcBox(item, data, amount, aDroite) {
     `<span class="calc-tip" role="tooltip"><b>Calculé à partir des séances</b>` +
     `<span>${actives} séance${actives > 1 ? "s" : ""} · ${euros(amount)}</span>` +
     (detail ? `<span class="calc-tip-detail">${detail}</span>` : "") +
-    `<small>Modifiable dans le Suivi → journal des séances</small></span></div>`;
+    `<small>${aide}</small></span></div>`;
 }
 
 function gridTotalRow(label, ids, monthsByI, getValue, strong, key) {
