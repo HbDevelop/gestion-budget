@@ -591,48 +591,61 @@ function renderIncome() {
 // permet le partiel (ex. l'Etude payée en plusieurs fois dans le mois).
 function buildIncomeRow(item) {
   const current = () => monthData.values[item.id] || { amount: 0, paid: false };
-  const pct = (amt, rec) => (amt > 0 ? Math.max(0, Math.min(100, (rec / amt) * 100)) : 0);
   const v0 = current();
-  const rec0 = receivedOf(v0);
-  const full0 = v0.amount > 0 && rec0 >= v0.amount;
+  const full0 = v0.amount > 0 && receivedOf(v0) >= v0.amount;
 
-  const block = el("div", "income-block");
+  // Carte légère, même langage que le poste à séances (Etude) : ligne principale, deux chiffres
+  // compacts (encaissé avec virement / espèces, reste à recevoir), champs virement / espèces
+  // et barre fine bicolore.
+  const block = el("div", "income-block poste-card");
   const row = el("div", "row income-row" + (isReserve(item) ? " poste-reserve" : ""));
   row.innerHTML =
     `<input type="checkbox" class="paid-check" ${full0 ? "checked" : ""} title="Tout reçu" />` +
     `<span class="label-text">${escapeHtml(item.label)}${reserveTagHtml(item)}</span>` +
     `<input type="number" class="amount-input" value="${v0.amount}" step="0.01" />`;
-
+  const stats = el("div", "sx-stats sx-stats-2",
+    `<div class="sx-stat st-recu-box"><span>Encaissé</span><b class="st-recu"></b><small class="st-sur"></small></div>` +
+    `<div class="sx-stat st-reste-box"><span>À recevoir</span><b class="st-reste"></b><small class="st-note"></small></div>`);
   // L'encaissé est réparti entre virement (arrive sur le compte) et espèces (en main).
-  const recu = el("div", "income-recu" + (full0 ? " done" : ""));
+  const recu = el("div", "income-recu");
   recu.innerHTML =
     `<span class="recu-lbl">virement</span>` +
     `<input type="number" class="recu-input recu-vir" value="${virementOf(v0)}" step="0.01" aria-label="Montant encaissé par virement" />` +
     `<span class="recu-lbl">espèces</span>` +
-    `<input type="number" class="recu-input recu-cash" value="${cashOf(v0)}" step="0.01" aria-label="Montant encaissé en espèces" />` +
-    `<span class="recu-of">= <b class="recu-total">${euros(rec0)}</b> sur <b class="recu-amt">${euros(v0.amount)}</b></span>` +
-    `<span class="recu-bar"><i style="width:${pct(v0.amount, rec0)}%"></i></span>`;
-  block.append(row, recu);
+    `<input type="number" class="recu-input recu-cash" value="${cashOf(v0)}" step="0.01" aria-label="Montant encaissé en espèces" />`;
+  const bar = el("div", "sx-bar", `<i class="sx-bar-vir"></i><i class="sx-bar-cash"></i>`);
+  block.append(row, stats, recu, bar);
+
+  // Chiffres, barre et état « tout reçu » à partir d'une valeur.
+  const show = (v) => {
+    const amt = v.amount || 0;
+    const rec = receivedOf(v);
+    const reste = Math.max(0, amt - rec);
+    const full = amt > 0 && rec >= amt;
+    const base = Math.max(amt, rec, 1);
+    const part = (x) => Math.max(0, Math.min(100, (x / base) * 100)).toFixed(1) + "%";
+    stats.querySelector(".st-recu").textContent = euros(rec);
+    stats.querySelector(".st-sur").textContent = `sur ${euros(amt)}`;
+    stats.querySelector(".st-recu-box").classList.toggle("sx-stat-ok", rec > 0);
+    stats.querySelector(".st-reste").textContent = euros(reste);
+    stats.querySelector(".st-note").textContent = full ? "tout reçu ✓" : "";
+    stats.querySelector(".st-reste-box").classList.toggle("sx-stat-due", reste > 0);
+    bar.querySelector(".sx-bar-vir").style.width = part(virementOf(v));
+    bar.querySelector(".sx-bar-cash").style.width = part(cashOf(v));
+    block.classList.toggle("is-full", full);
+    return full;
+  };
+  show(v0);
 
   const amountInput = row.querySelector(".amount-input");
   const paidCheck = row.querySelector(".paid-check");
   const virInput = recu.querySelector(".recu-vir");
   const cashInput = recu.querySelector(".recu-cash");
-  const recuTotalEl = recu.querySelector(".recu-total");
-  const recuOfEl = recu.querySelector(".recu-amt");
-  const bar = recu.querySelector(".recu-bar i");
 
-  // Applique la valeur, resynchronise l'affichage (barre, "sur X", case, total), sauvegarde.
+  // Applique la valeur, resynchronise l'affichage (chiffres, barre, case), sauvegarde.
   const commit = (next) => {
     markChanged(setItemValue(monthData, item.id, next));
-    const amt = next.amount || 0;
-    const rec = receivedOf(next);
-    const full = amt > 0 && rec >= amt;
-    recuOfEl.textContent = euros(amt);
-    recuTotalEl.textContent = euros(rec);
-    bar.style.width = pct(amt, rec) + "%";
-    recu.classList.toggle("done", full);
-    paidCheck.checked = full;
+    paidCheck.checked = show(next);
     if (document.activeElement !== virInput) virInput.value = virementOf(next);
     if (document.activeElement !== cashInput) cashInput.value = cashOf(next);
     renderTotals();
@@ -776,7 +789,7 @@ function buildSeancesBlock(item) {
   // Entre un revenu ordinaire et une carte : léger encadré, mais même colonnes que les autres
   // revenus (icône à la place de la case, montant prévu aligné sur les champs voisins), puis
   // trois chiffres compacts, une barre fine virement / espèces et le lien vers le journal.
-  const block = el("div", "income-block sx" + (open ? " sx-open" : "") + (full ? " sx-full" : ""));
+  const block = el("div", "income-block poste-card sx" + (open ? " sx-open" : "") + (full ? " is-full" : ""));
   const row = el("div", "row income-row");
   row.innerHTML =
     `<span class="sx-icon" aria-hidden="true">🎓</span>` +
