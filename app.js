@@ -750,39 +750,52 @@ async function runSeanceOp(op, args, apply) {
 function buildSeancesBlock(item) {
   const v = monthData.values[item.id] || { amount: 0 };
   const seances = seancesOfItem(monthData, item.id);
+  const actives = seances.filter((s) => s.statut !== "annulee");
   const aVenir = typeof v.aVenir === "number" ? v.aVenir : Math.max(0, (v.amount || 0) - receivedOf(v));
   const arr = arrieresSeances.liste.filter((s) => s.itemId === item.id);
+  const arrTotal = arr.reduce((t, s) => t + (s.prix || 0), 0);
   const open = seancesOuverts.has(item.id);
+  const recu = receivedOf(v);
+  // Barre : part virement / espèces de l'encaissé, rapportée au prévu (ou à l'encaissé s'il le dépasse).
+  const base = Math.max(v.amount || 0, recu, 1);
+  const pct = (x) => Math.max(0, Math.min(100, (x / base) * 100)).toFixed(1);
 
-  const block = el("div", "income-block seances-block");
-  const head = el("div", "row income-row");
-  head.innerHTML =
-    `<span class="label-text">${escapeHtml(item.label)} <span class="poste-tag poste-tag-seances">séances</span></span>` +
-    `<button type="button" class="btn small seances-toggle${open ? " active" : ""}">Séances (${seances.filter((s) => s.statut !== "annulee").length})</button>`;
-  const recap = el("div", "seances-recap",
-    `<span>Prévu <b>${euros(v.amount || 0)}</b></span>` +
-    `<span>Encaissé <b>${euros(receivedOf(v))}</b>` +
-    (receivedOf(v) ? ` <small>(virement ${euros(virementOf(v))} · espèces ${euros(cashOf(v))})</small>` : "") + `</span>` +
-    `<span>Reste dû <b>${euros(aVenir)}</b></span>` +
-    (arr.length ? `<span class="seances-arr">+ ${euros(arr.reduce((t, s) => t + (s.prix || 0), 0))} à encaisser des mois précédents</span>` : ""));
-  block.append(head, recap);
-  head.querySelector(".seances-toggle").addEventListener("click", () => {
+  const block = el("div", "income-block sx" + (open ? " sx-open" : ""));
+  block.innerHTML =
+    `<div class="sx-head">
+      <div class="sx-title"><span class="sx-icon">🎓</span><div><b>${escapeHtml(item.label)}</b>` +
+      `<small>${actives.length} séance${actives.length > 1 ? "s" : ""} ce mois · paiement à la séance</small></div></div>
+      <button type="button" class="sx-toggle" aria-expanded="${open}">${open ? "Fermer" : "Journal"} <span class="sx-chev">▾</span></button>
+    </div>
+    <div class="sx-kpis">
+      <div class="sx-kpi"><span>Prévu</span><b>${euros(v.amount || 0)}</b></div>
+      <div class="sx-kpi sx-ok"><span>Encaissé</span><b>${euros(recu)}</b>` +
+      (recu ? `<small>💳 ${euros(virementOf(v))} · 💶 ${euros(cashOf(v))}</small>` : "") + `</div>
+      <div class="sx-kpi${aVenir > 0 ? " sx-due" : ""}"><span>Reste dû</span><b>${euros(aVenir)}</b></div>
+    </div>
+    <div class="sx-bar" title="Encaissé : virement ${euros(virementOf(v))}, espèces ${euros(cashOf(v))}">` +
+      `<i class="sx-bar-vir" style="width:${pct(virementOf(v))}%"></i><i class="sx-bar-cash" style="width:${pct(cashOf(v))}%"></i></div>` +
+    (arr.length ? `<div class="sx-alert">⏳ <b>${euros(arrTotal)}</b> à encaisser des mois précédents · ${arr.length} séance${arr.length > 1 ? "s" : ""}</div>` : "");
+  block.querySelector(".sx-toggle").addEventListener("click", () => {
     if (open) seancesOuverts.delete(item.id); else seancesOuverts.add(item.id);
     render();
   });
   if (!open) return block;
 
-  const panel = el("div", "seances-panel");
+  const panel = el("div", "sx-panel");
   if (arr.length) {
-    panel.appendChild(el("h4", "seances-title", "À encaisser (mois précédents)"));
-    const list = el("div", "seances-list");
+    panel.appendChild(el("div", "sx-section", `<h4>À encaisser</h4><span>mois précédents</span>`));
+    const list = el("div", "sx-list");
     arr.forEach((s) => list.appendChild(seanceRow(item, s, s.mois, true)));
     panel.appendChild(list);
   }
   const mois = monthLabel(currentMonthId).toLowerCase();
-  panel.appendChild(el("h4", "seances-title", `Séances ${/^[aeiouyéè]/.test(mois) ? "d'" : "de "}${mois}`));
-  const list = el("div", "seances-list");
-  if (!seances.length) list.appendChild(el("p", "seances-empty", "Aucune séance enregistrée ce mois-ci."));
+  const nb = (st) => seances.filter((s) => s.statut === st).length;
+  const resume = [[nb("faite"), "faite"], [nb("prevue"), "prévue"], [nb("annulee"), "annulée"]]
+    .filter(([n]) => n).map(([n, l]) => `${n} ${l}${n > 1 ? "s" : ""}`).join(" · ");
+  panel.appendChild(el("div", "sx-section", `<h4>Séances ${/^[aeiouyéè]/.test(mois) ? "d'" : "de "}${mois}</h4><span>${resume}</span>`));
+  const list = el("div", "sx-list");
+  if (!seances.length) list.appendChild(el("p", "sx-empty", "Aucune séance enregistrée ce mois-ci. Ajoute la première ci-dessous."));
   seances.forEach((s) => list.appendChild(seanceRow(item, s, currentMonthId, false)));
   panel.appendChild(list);
   panel.appendChild(seanceForm(item));
@@ -791,84 +804,123 @@ function buildSeancesBlock(item) {
   return block;
 }
 
-// Une séance : date, élève, prix, statut, paiement, et les actions possibles.
+// Couleur d'avatar stable par élève (teinte dérivée de son identifiant).
+function eleveHue(id) {
+  let h = 0;
+  for (const c of String(id || "")) h = (h * 31 + c.charCodeAt(0)) >>> 0;
+  // Angle d'or : deux identifiants proches donnent quand même des teintes bien distinctes.
+  return Math.round((h * 137.508) % 360);
+}
+function eleveAvatar(item, eleveId) {
+  const nom = eleveNom(item, eleveId);
+  const lettre = nom === "—" ? "?" : nom.trim().charAt(0).toUpperCase();
+  return `<span class="sx-av" style="--h:${eleveHue(eleveId)}">${escapeHtml(lettre)}</span>`;
+}
+
+// Une séance : carte avec date, élève, prix, statut, paiement ; actions principales visibles,
+// les autres dans le menu « ⋯ ».
 function seanceRow(item, s, mois, arriere) {
-  const row = el("div", "seance-row" + (s.statut === "annulee" ? " annulee" : ""));
   const passee = s.date.slice(0, 10) <= todayStr();
-  const statut = s.statut === "annulee" ? `<span class="st st-annulee">✖ annulée</span>`
-    : s.statut === "faite" ? `<span class="st st-faite">✔ faite</span>`
-    : passee ? `<span class="st st-confirmer">◷ à confirmer</span>` : `<span class="st st-prevue">◷ prévue</span>`;
+  const etat = s.statut === "annulee" ? "annulee" : s.statut === "faite" ? "faite" : passee ? "confirmer" : "prevue";
+  const card = el("div", `sx-card sx-${etat}${s.paiement ? " sx-payee" : ""}`);
+  const [d, t] = s.date.split("T");
+  const [y, m, j] = d.split("-").map(Number);
+  const jour = new Date(y, m - 1, j).toLocaleDateString("fr-FR", { weekday: "short" });
+  const chip = {
+    annulee: `<span class="chip chip-annulee">Annulée</span>`,
+    faite: `<span class="chip chip-faite">✓ Faite</span>`,
+    confirmer: `<span class="chip chip-confirmer">À confirmer</span>`,
+    prevue: `<span class="chip chip-prevue">Prévue</span>`
+  }[etat];
   const paye = s.paiement
-    ? `<span class="st st-payee">✔ payée · ${s.paiement.mode === "especes" ? "espèces" : "virement"} · ${shortDate(s.paiement.date)}</span>`
-    : s.statut === "annulee" ? "" : `<span class="st st-due">⏳ non payée</span>`;
-  row.innerHTML =
-    `<span class="seance-date">${seanceDateLabel(s.date)}${arriere ? ` <small>(${monthLabelShort(mois)})</small>` : ""}</span>` +
-    `<span class="seance-eleve">${escapeHtml(eleveNom(item, s.eleveId))}</span>` +
-    `<span class="seance-prix">${euros(s.prix)}</span>` +
-    `<span class="seance-st">${statut}${paye}</span>`;
-  const actions = el("div", "seance-actions");
-  const btn = (label, cls, fn) => {
-    const b = el("button", "btn small " + (cls || ""), label);
+    ? `<span class="chip chip-payee">${s.paiement.mode === "especes" ? "💶 Espèces" : "💳 Virement"} · ${shortDate(s.paiement.date)}</span>`
+    : etat === "annulee" ? "" : `<span class="chip chip-due">Non payée</span>`;
+  card.innerHTML =
+    `<div class="sx-date"><b>${j}</b><span>${jour}</span><small>${arriere ? monthLabelShort(mois) : t}</small></div>
+    <div class="sx-body">
+      <div class="sx-line">${eleveAvatar(item, s.eleveId)}<span class="sx-name">${escapeHtml(eleveNom(item, s.eleveId))}</span>` +
+      `<span class="sx-price">${euros(s.prix)}</span></div>
+      <div class="sx-chips">${chip}${paye}</div>
+    </div>`;
+  const body = card.querySelector(".sx-body");
+  const actions = el("div", "sx-actions");
+  const menu = el("div", "sx-menu");
+  const btn = (parent, label, cls, fn) => {
+    const b = el("button", cls, label);
     b.type = "button";
     b.addEventListener("click", fn);
-    actions.appendChild(b);
+    parent.appendChild(b);
     return b;
   };
   const patch = (p) => runSeanceOp("modifier", { mois, patch: p, paiement: s.paiement }, (docs) => modifierSeance(docs, mois, s.id, p));
 
   if (s.statut === "annulee") {
-    btn("Rétablir", "", () => patch({ statut: "prevue" }));
+    btn(actions, "↺ Rétablir", "sx-btn", () => patch({ statut: "prevue" }));
   } else {
-    if (s.statut === "prevue") btn("Faite", "", () => patch({ statut: "faite" }));
+    if (s.statut === "prevue") btn(actions, "✓ Faite", "sx-btn", () => patch({ statut: "faite" }));
     if (!s.paiement) {
-      const date = el("input", "seance-paydate");
+      const pay = el("div", "sx-pay");
+      const date = el("input", "sx-paydate");
       date.type = "date";
       date.value = todayStr();
       date.title = "Date du paiement (compté dans ce mois-là)";
-      actions.appendChild(date);
-      const pay = (mode) => runSeanceOp("payer", { mois, date: date.value }, (docs) => payerSeance(docs, mois, s.id, mode, date.value));
-      btn("Payée virement", "", () => pay("virement"));
-      btn("Payée espèces", "", () => pay("especes"));
-      if (s.statut === "prevue") btn("Annuler la séance", "danger", () => patch({ statut: "annulee" }));
+      pay.appendChild(date);
+      const payer = (mode) => runSeanceOp("payer", { mois, date: date.value }, (docs) => payerSeance(docs, mois, s.id, mode, date.value));
+      btn(pay, "💳 Virement", "sx-btn sx-btn-pay", () => payer("virement"));
+      btn(pay, "💶 Espèces", "sx-btn sx-btn-pay", () => payer("especes"));
+      actions.appendChild(pay);
+      if (s.statut === "prevue") btn(menu, "Annuler la séance", "sx-menu-item", () => patch({ statut: "annulee" }));
     } else {
-      btn("Annuler le paiement", "", () => {
+      btn(menu, "Annuler le paiement", "sx-menu-item", () => {
         if (!confirm("Annuler le paiement de cette séance ?")) return;
         runSeanceOp("annulerPaiement", { mois, paiement: s.paiement }, (docs) => annulerPaiement(docs, mois, s.id));
       });
     }
   }
   if (!arriere) {
-    btn("Modifier", "", () => {
-      const open = row.querySelector(".seance-edit");
+    btn(menu, "Modifier", "sx-menu-item", () => {
+      more.open = false;
+      const open = card.querySelector(".seance-edit");
       if (open) open.remove();
-      else row.appendChild(seanceForm(item, { ...s, mois }));
+      else card.appendChild(seanceForm(item, { ...s, mois }));
     });
   }
   // Saisie erronée (faute de frappe, doublon…) : la séance disparaît complètement, même
   // annulée. Une séance payée doit d'abord perdre son paiement.
   if (!s.paiement) {
-    btn("Supprimer", "danger", () => {
+    btn(menu, "Supprimer", "sx-menu-item sx-danger", () => {
       if (!confirm(`Supprimer définitivement la séance du ${seanceDateLabel(s.date)} (${euros(s.prix)}) ?\n\nElle disparaîtra de la liste et des totaux.`)) return;
       runSeanceOp("supprimer", { mois }, (docs) => supprimerSeance(docs, mois, s.id));
     });
   }
-  row.appendChild(actions);
-  return row;
+  if (actions.children.length) body.appendChild(actions);
+  const more = el("details", "sx-more", `<summary aria-label="Plus d'actions" title="Plus d'actions">⋯</summary>`);
+  more.appendChild(menu);
+  if (menu.children.length) card.appendChild(more);
+  return card;
 }
+
+// Un seul menu « ⋯ » ouvert à la fois ; un clic ailleurs le ferme.
+document.addEventListener("click", (ev) => {
+  document.querySelectorAll(".sx-more[open]").forEach((d) => { if (!d.contains(ev.target)) d.open = false; });
+});
 
 // Formulaire de séance : nouvelle (sans `edit`) ou modification d'une séance existante.
 function seanceForm(item, edit) {
-  const form = el("form", edit ? "seance-form seance-edit" : "seance-form");
+  const form = el("form", edit ? "sx-form seance-edit" : "sx-form sx-new");
   const eleves = elevesOf(item).filter((e) => e.actif !== false || (edit && e.id === edit.eleveId));
+  const field = (label, html) => `<label class="sx-field"><span>${label}</span>${html}</label>`;
   form.innerHTML =
-    (edit ? "" : `<span class="seance-form-title">Nouvelle séance</span>`) +
-    `<input type="datetime-local" name="date" required value="${edit ? edit.date : defaultSeanceDate()}" />` +
-    `<select name="eleve"><option value="">— élève —</option>${eleves.map((e) =>
-      `<option value="${escapeAttr(e.id)}"${edit && edit.eleveId === e.id ? " selected" : ""}>${escapeHtml(e.nom)}</option>`).join("")}</select>` +
-    `<input type="number" name="prix" step="0.01" min="0" placeholder="Prix" required value="${edit ? edit.prix : ""}" />` +
-    (edit ? `<select name="statut">${[["prevue", "prévue"], ["faite", "faite"], ["annulee", "annulée"]].map(([k, l]) =>
-      `<option value="${k}"${edit.statut === k ? " selected" : ""}>${l}</option>`).join("")}</select>` : "") +
-    `<button type="submit" class="btn small primary">${edit ? "Enregistrer" : "Ajouter"}</button>`;
+    (edit ? "" : `<div class="sx-form-title"><span class="sx-plus">＋</span> Nouvelle séance</div>`) +
+    `<div class="sx-form-grid">` +
+    field("Date et heure", `<input type="datetime-local" name="date" required value="${edit ? edit.date : defaultSeanceDate()}" />`) +
+    field("Élève", `<select name="eleve"><option value="">— choisir —</option>${eleves.map((e) =>
+      `<option value="${escapeAttr(e.id)}"${edit && edit.eleveId === e.id ? " selected" : ""}>${escapeHtml(e.nom)}</option>`).join("")}</select>`) +
+    field("Prix", `<span class="sx-euro"><input type="number" name="prix" step="0.01" min="0" placeholder="0" required value="${edit ? edit.prix : ""}" /><i>€</i></span>`) +
+    (edit ? field("Statut", `<select name="statut">${[["prevue", "Prévue"], ["faite", "Faite"], ["annulee", "Annulée"]].map(([k, l]) =>
+      `<option value="${k}"${edit.statut === k ? " selected" : ""}>${l}</option>`).join("")}</select>`) : "") +
+    `<button type="submit" class="sx-btn sx-btn-primary">${edit ? "Enregistrer" : "Ajouter"}</button>` +
+    `</div>`;
   // Le tarif de l'élève est proposé comme prix (modifiable).
   form.elements.eleve.addEventListener("change", () => {
     const e = (item.eleves || []).find((x) => x.id === form.elements.eleve.value);
@@ -895,9 +947,10 @@ function seanceForm(item, edit) {
 
 // Élèves du poste (catalogue) : nom, tarif par séance, actif.
 function elevesEditor(item) {
-  const box = el("details", "eleves-box");
+  const box = el("details", "sx-eleves");
   const list = elevesOf(item);
-  box.innerHTML = `<summary>Élèves (${list.filter((e) => e.actif !== false).length})</summary>`;
+  const actifs = list.filter((e) => e.actif !== false).length;
+  box.innerHTML = `<summary><span>👥 Élèves</span><small>${actifs} actif${actifs > 1 ? "s" : ""}${list.length > actifs ? ` · ${list.length - actifs} inactif${list.length - actifs > 1 ? "s" : ""}` : ""}</small><span class="sx-chev">▾</span></summary>`;
   box.addEventListener("toggle", () => {
     if (box.open) elevesOuverts.add(item.id); else elevesOuverts.delete(item.id);
   });
@@ -906,12 +959,12 @@ function elevesEditor(item) {
     render();
   };
   list.forEach((e) => {
-    const row = el("div", "eleve-row" + (e.actif === false ? " inactif" : ""));
+    const row = el("div", "sx-eleve" + (e.actif === false ? " inactif" : ""));
     row.innerHTML =
+      eleveAvatar(item, e.id) +
       `<input type="text" class="eleve-nom" value="${escapeAttr(e.nom)}" aria-label="Nom" />` +
-      `<input type="number" class="eleve-tarif" step="0.01" min="0" value="${typeof e.tarif === "number" ? e.tarif : ""}" aria-label="Tarif par séance" />` +
-      `<span class="recu-lbl">€ / séance</span>` +
-      `<label class="eleve-actif"><input type="checkbox" ${e.actif === false ? "" : "checked"} /> actif</label>`;
+      `<span class="sx-euro sx-tarif"><input type="number" class="eleve-tarif" step="0.01" min="0" value="${typeof e.tarif === "number" ? e.tarif : ""}" aria-label="Tarif par séance" /><i>€ / séance</i></span>` +
+      `<label class="sx-switch" title="${e.actif === false ? "Inactif : n'apparaît plus dans les nouvelles séances" : "Actif"}"><input type="checkbox" ${e.actif === false ? "" : "checked"} aria-label="Actif" /><span></span></label>`;
     const target = () => item.eleves.find((x) => x.id === e.id);
     row.querySelector(".eleve-nom").addEventListener("change", (ev) => {
       const nom = ev.target.value.trim();
@@ -935,19 +988,19 @@ function elevesEditor(item) {
       }
       render();
     });
-    row.querySelector(".eleve-actif input").addEventListener("change", (ev) => {
+    row.querySelector(".sx-switch input").addEventListener("change", (ev) => {
       target().actif = ev.target.checked;
       save();
     });
     box.appendChild(row);
     if (tarifEnAttente && tarifEnAttente.itemId === item.id && tarifEnAttente.eleveId === e.id) box.appendChild(tarifPrompt(e));
   });
-  const add = el("form", "eleve-row eleve-add");
+  const add = el("form", "sx-eleve sx-eleve-add");
   add.innerHTML =
+    `<span class="sx-av sx-av-add">＋</span>` +
     `<input type="text" name="nom" placeholder="Nouvel élève" required />` +
-    `<input type="number" name="tarif" step="0.01" min="0" placeholder="Tarif" />` +
-    `<span class="recu-lbl">€ / séance</span>` +
-    `<button type="submit" class="btn small">Ajouter</button>`;
+    `<span class="sx-euro sx-tarif"><input type="number" name="tarif" step="0.01" min="0" placeholder="Tarif" /><i>€ / séance</i></span>` +
+    `<button type="submit" class="sx-btn">Ajouter</button>`;
   add.addEventListener("submit", (ev) => {
     ev.preventDefault();
     const nom = add.elements.nom.value.trim();
@@ -956,6 +1009,7 @@ function elevesEditor(item) {
     if (!item.eleves) item.eleves = [];
     item.eleves.push({ id: uid(), nom, tarif: t >= 0 ? t : null, actif: true });
     seancesOuverts.add(item.id);
+    elevesOuverts.add(item.id);
     save();
   });
   box.appendChild(add);
@@ -979,7 +1033,7 @@ function tarifPrompt(eleve) {
     `<small>Les séances payées, annulées ou à un prix ajusté à la main ne changent pas.</small>`);
   const actions = el("div", "tarif-actions");
   const btn = (label, cls, seances) => {
-    const b = el("button", "btn small " + cls, label);
+    const b = el("button", "sx-btn " + cls, label);
     b.type = "button";
     b.addEventListener("click", () => {
       tarifEnAttente = null;
@@ -988,7 +1042,7 @@ function tarifPrompt(eleve) {
     });
     actions.appendChild(b);
   };
-  if (p.avenir.length) btn(`Séances à venir (${p.avenir.length})`, "primary", p.avenir);
+  if (p.avenir.length) btn(`Séances à venir (${p.avenir.length})`, "sx-btn-primary", p.avenir);
   if (p.toutes.length > p.avenir.length) btn(`Toutes les non payées (${p.toutes.length})`, "", p.toutes);
   btn("Ne rien changer", "", null);
   box.appendChild(actions);
