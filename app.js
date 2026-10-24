@@ -7,7 +7,7 @@ import {
   getFirestore, doc, getDoc as fbGetDoc, setDoc as fbSetDoc, updateDoc as fbUpdateDoc, deleteField,
   collection, getDocs as fbGetDocs, query, orderBy
 } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
-import { isDemoEmail, createDemoStore, DEMO_LABELS } from "./demo.js?v=6";
+import { isDemoEmail, createDemoStore, DEMO_LABELS } from "./demo.js?v=8";
 import {
   monthId, addMonths, isActiveAt, inScope, isShared, receivedOf, cashOf, virementOf,
   withIncomeAmount, sumBankBalances, bankFor, cashFor, computeTotals, cloneForNewMonth,
@@ -16,8 +16,9 @@ import {
 } from "./budget-core.js?v=3";
 import {
   isSeancesItem, hasSeances, seancesOfItem, monthOfDate, monthsNeeded, ajouterSeance, modifierSeance,
-  payerSeance, annulerPaiement, supprimerSeance, arrieres, elevesOf, seancesATarifer, appliquerTarif
-} from "./seances.js?v=2";
+  payerSeance, annulerPaiement, supprimerSeance, arrieres, elevesOf, seancesATarifer, appliquerTarif,
+  datesRecurrentes, programmerSeances, seancesSerie, supprimerSeances
+} from "./seances.js?v=4";
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -205,6 +206,9 @@ const seancesOuverts = new Set();
 // choix de l'utilisateur (quelles séances passent au nouveau prix).
 const elevesOuverts = new Set();
 let tarifEnAttente = null;
+// Programmation automatique : formulaire resté ouvert, et message de confirmation à afficher.
+const progOuverts = new Set();
+let seancesFlash = null;
 let charts = {
   pie: null, pieAvg: null, line: null, investment: null, cap: null, balance: null, occTop: null,
   famIncome: null, famSplit: null, famStack: null
@@ -783,6 +787,10 @@ function buildSeancesBlock(item) {
   if (!open) return block;
 
   const panel = el("div", "sx-panel");
+  if (seancesFlash && seancesFlash.itemId === item.id) {
+    panel.appendChild(el("div", "sx-flash", seancesFlash.html));
+    seancesFlash = null;
+  }
   if (arr.length) {
     panel.appendChild(el("div", "sx-section", `<h4>À encaisser</h4><span>mois précédents</span>`));
     const list = el("div", "sx-list");
@@ -799,6 +807,7 @@ function buildSeancesBlock(item) {
   seances.forEach((s) => list.appendChild(seanceRow(item, s, currentMonthId, false)));
   panel.appendChild(list);
   panel.appendChild(seanceForm(item));
+  panel.appendChild(programmationForm(item));
   panel.appendChild(elevesEditor(item));
   block.appendChild(panel);
   return block;
@@ -840,7 +849,7 @@ function seanceRow(item, s, mois, arriere) {
     <div class="sx-body">
       <div class="sx-line">${eleveAvatar(item, s.eleveId)}<span class="sx-name">${escapeHtml(eleveNom(item, s.eleveId))}</span>` +
       `<span class="sx-price">${euros(s.prix)}</span></div>
-      <div class="sx-chips">${chip}${paye}</div>
+      <div class="sx-chips">${chip}${paye}${s.serieId ? `<span class="chip chip-serie" title="Séance programmée automatiquement">🔁</span>` : ""}</div>
     </div>`;
   const body = card.querySelector(".sx-body");
   const actions = el("div", "sx-actions");
@@ -893,6 +902,20 @@ function seanceRow(item, s, mois, arriere) {
       runSeanceOp("supprimer", { mois }, (docs) => supprimerSeance(docs, mois, s.id));
     });
   }
+  if (s.serieId && s.statut === "prevue" && !s.paiement && !arriere) {
+    btn(menu, "Supprimer celle-ci et les suivantes de la série", "sx-menu-item sx-danger", async () => {
+      more.open = false;
+      const liste = seancesSerie(await monthsForTarif(), s.serieId, s.date);
+      if (!liste.length) return;
+      const fin = liste[liste.length - 1];
+      if (!confirm(`Supprimer ${liste.length} séance${liste.length > 1 ? "s" : ""} prévue${liste.length > 1 ? "s" : ""} de cette série, du ${seanceDateLabel(s.date)} au ${seanceDateLabel(fin.date)} ?\n\nLes séances faites ou payées sont gardées.`)) return;
+      runSeanceOp("supprimerListe", { seances: liste }, (docs) => {
+        const ch = supprimerSeances(docs, liste);
+        seancesFlash = { itemId: item.id, html: `✓ ${liste.length} séance${liste.length > 1 ? "s" : ""} de la série supprimée${liste.length > 1 ? "s" : ""}.` };
+        return ch;
+      });
+    });
+  }
   if (actions.children.length) body.appendChild(actions);
   const more = el("details", "sx-more", `<summary aria-label="Plus d'actions" title="Plus d'actions">⋯</summary>`);
   more.appendChild(menu);
@@ -943,6 +966,103 @@ function seanceForm(item, edit) {
     }
   });
   return form;
+}
+
+// Programmation automatique : un élève, un ou plusieurs jours de la semaine, une heure, une
+// période. Aperçu en direct, puis création des séances « prévues » (une série).
+const JOURS_SEMAINE = [[1, "L", "lundi"], [2, "M", "mardi"], [3, "M", "mercredi"], [4, "J", "jeudi"], [5, "V", "vendredi"], [6, "S", "samedi"], [0, "D", "dimanche"]];
+
+function isoDate(d) {
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+function programmationForm(item) {
+  const box = el("details", "sx-prog");
+  box.innerHTML = `<summary><span class="sx-plus">🔁</span><span>Programmer des séances</span><small>ex. chaque mardi à 18h</small><span class="sx-chev">▾</span></summary>`;
+  box.open = progOuverts.has(item.id);
+  box.addEventListener("toggle", () => {
+    if (box.open) progOuverts.add(item.id); else progOuverts.delete(item.id);
+  });
+  // Période par défaut : d'aujourd'hui (ou du 1er du mois affiché s'il est à venir) à la fin
+  // du mois suivant.
+  const debut = currentMonthId > monthId(new Date()) ? `${currentMonthId}-01` : todayStr();
+  const [y, m] = debut.split("-").map(Number);
+  const fin = isoDate(new Date(y, m + 1, 0));
+  const eleves = elevesOf(item).filter((e) => e.actif !== false);
+  const field = (label, html, cls = "") => `<label class="sx-field ${cls}"><span>${label}</span>${html}</label>`;
+  const form = el("form", "sx-form sx-prog-form");
+  form.innerHTML =
+    `<div class="sx-form-grid">` +
+    field("Élève", `<select name="eleve" required><option value="">— choisir —</option>${eleves.map((e) =>
+      `<option value="${escapeAttr(e.id)}">${escapeHtml(e.nom)}</option>`).join("")}</select>`) +
+    field("Prix", `<span class="sx-euro"><input type="number" name="prix" step="0.01" min="0" placeholder="0" required /><i>€</i></span>`) +
+    field("Heure", `<input type="time" name="heure" required value="18:00" />`) +
+    `</div>` +
+    `<div class="sx-field"><span>Jours</span><div class="sx-days">${JOURS_SEMAINE.map(([n, l, nom]) =>
+      `<label class="sx-day" title="${nom}"><input type="checkbox" name="jour" value="${n}" /><span>${l}</span></label>`).join("")}</div></div>` +
+    `<div class="sx-form-grid">` +
+    field("Du", `<input type="date" name="du" required value="${debut}" />`) +
+    field("Au", `<input type="date" name="au" required value="${fin}" />`) +
+    `</div>` +
+    `<div class="sx-prog-preview"></div>` +
+    `<button type="submit" class="sx-btn sx-btn-primary" disabled>Programmer</button>`;
+  const preview = form.querySelector(".sx-prog-preview");
+  const submit = form.querySelector("button[type=submit]");
+  const params = () => ({
+    jours: [...form.querySelectorAll("input[name=jour]:checked")].map((c) => Number(c.value)),
+    heure: form.elements.heure.value,
+    du: form.elements.du.value,
+    au: form.elements.au.value
+  });
+  // Aperçu : nombre de séances, première et dernière, total et répartition par mois.
+  const update = () => {
+    const prix = parseFloat(form.elements.prix.value);
+    let dates = [];
+    let err = null;
+    try {
+      if (params().jours.length) dates = datesRecurrentes(params());
+    } catch (e) { err = e.message; }
+    submit.disabled = !!err || !dates.length || !form.elements.eleve.value || !(prix >= 0);
+    if (err) { preview.innerHTML = `<span class="sx-prog-err">${escapeHtml(err)}</span>`; return; }
+    if (!params().jours.length) { preview.innerHTML = `<span class="sx-prog-hint">Choisis un ou plusieurs jours de la semaine.</span>`; return; }
+    if (!dates.length) { preview.innerHTML = `<span class="sx-prog-hint">Aucune date dans cette période.</span>`; return; }
+    const parMois = {};
+    dates.forEach((d) => { const mid = monthOfDate(d); parMois[mid] = (parMois[mid] || 0) + 1; });
+    const repartition = Object.entries(parMois).map(([mid, n]) => `${n} en ${monthLabel(mid).toLowerCase()}`).join(" · ");
+    preview.innerHTML =
+      `<b>${dates.length} séance${dates.length > 1 ? "s" : ""}</b> · ${seanceDateLabel(dates[0])}` +
+      (dates.length > 1 ? ` → ${seanceDateLabel(dates[dates.length - 1])}` : "") +
+      (prix >= 0 ? ` · <b>${euros(prix * dates.length)}</b>` : "") +
+      `<small>${repartition}</small>`;
+    submit.textContent = `Programmer ${dates.length} séance${dates.length > 1 ? "s" : ""}`;
+  };
+  form.elements.eleve.addEventListener("change", () => {
+    const e = (item.eleves || []).find((x) => x.id === form.elements.eleve.value);
+    if (e && typeof e.tarif === "number") form.elements.prix.value = e.tarif;
+    update();
+  });
+  form.addEventListener("input", update);
+  form.addEventListener("change", update);
+  form.addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    let dates;
+    try { dates = datesRecurrentes(params()); } catch (e) { alert(e.message); return; }
+    const base = { itemId: item.id, eleveId: form.elements.eleve.value, prix: parseFloat(form.elements.prix.value), serieId: uid() };
+    const nom = eleveNom(item, base.eleveId);
+    runSeanceOp("programmer", { dates }, (docs) => {
+      const r = programmerSeances(docs, base, dates, uid);
+      progOuverts.delete(item.id);
+      seancesFlash = {
+        itemId: item.id,
+        html: `✓ <b>${r.creees.length} séance${r.creees.length > 1 ? "s" : ""}</b> programmée${r.creees.length > 1 ? "s" : ""} pour ${escapeHtml(nom)}` +
+          (r.ignorees.length ? ` · ${r.ignorees.length} déjà existante${r.ignorees.length > 1 ? "s" : ""}, ignorée${r.ignorees.length > 1 ? "s" : ""}` : "") + "."
+      };
+      return r.changes;
+    });
+  });
+  update();
+  box.appendChild(form);
+  return box;
 }
 
 // Élèves du poste (catalogue) : nom, tarif par séance, actif.

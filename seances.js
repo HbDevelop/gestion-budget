@@ -12,6 +12,8 @@
 //   l'ARGENT ARRIVE (date du paiement), qui peut être après le mois de la séance.
 // - `seancesBase.<itemId>` = { amount, received, receivedCash } : ce qui avait été saisi à la
 //   main sur le mois avant d'y enregistrer la première séance (conservé tel quel).
+// - `seancesEstimation.<itemId>` = montant estimé à la main avant la première séance du mois,
+//   rétabli si toutes les séances du mois sont retirées (ex. série programmée puis supprimée).
 //
 // À partir de là, values.<itemId> du mois est recalculé (recomputeItem) :
 // - amount : si le mois a des séances, la somme des séances non annulées (+ base) ; sinon le
@@ -100,20 +102,30 @@ export function recomputeItem(data, itemId, { seanceRetiree = false } = {}) {
   if (!data.values) data.values = {};
   const prev = data.values[itemId] || { amount: 0, paid: false };
   const sansSeance = seanceRetiree && !hasSeances(data, itemId);
-  const v = seancesValue(data, itemId, sansSeance ? { ...prev, amount: 0 } : prev);
+  // Dernière séance retirée : retour à l'estimation manuelle d'avant les séances (0 sinon).
+  const extra = [];
+  let estimation = 0;
+  if (sansSeance && data.seancesEstimation && itemId in data.seancesEstimation) {
+    estimation = data.seancesEstimation[itemId] || 0;
+    const rest = { ...data.seancesEstimation };
+    delete rest[itemId];
+    data.seancesEstimation = rest;
+    extra.push(`seancesEstimation.${itemId}`);
+  }
+  const v = seancesValue(data, itemId, sansSeance ? { ...prev, amount: estimation } : prev);
   let next;
   if (v) {
     next = { ...prev, ...v };
   } else if (typeof prev.aVenir === "number") {
     // Plus aucune séance ni paiement : retour en saisie manuelle (montant gardé, sauf s'il
     // venait des séances retirées).
-    next = { ...prev, amount: sansSeance ? 0 : (prev.amount || 0), received: 0, receivedCash: 0, paid: false };
+    next = { ...prev, amount: sansSeance ? estimation : (prev.amount || 0), received: 0, receivedCash: 0, paid: false };
     delete next.aVenir;
     delete next.recuSeances;
   } else {
-    return [];
+    return extra;
   }
-  return setItemValue(data, itemId, next);
+  return [...extra, ...setItemValue(data, itemId, next)];
 }
 
 // Premier passage d'un mois en mode séances : l'encaissé saisi à la main jusque-là est gardé
@@ -126,6 +138,15 @@ function ensureBase(data, itemId) {
   if (!received) return [];
   data.seancesBase = { ...(data.seancesBase || {}), [itemId]: { amount: received, received, receivedCash: cashOf(v) } };
   return [`seancesBase.${itemId}`];
+}
+
+// Première séance d'un mois pour ce poste : son montant estimé à la main est mémorisé.
+function rememberEstimation(data, itemId) {
+  if (hasSeances(data, itemId)) return [];
+  if (data.seancesEstimation && itemId in data.seancesEstimation) return [];
+  const v = data.values && data.values[itemId];
+  data.seancesEstimation = { ...(data.seancesEstimation || {}), [itemId]: (v && v.amount) || 0 };
+  return [`seancesEstimation.${itemId}`];
 }
 
 // ---- Opérations ----
@@ -173,6 +194,8 @@ export function monthsNeeded(op, args) {
   if (op === "annulerPaiement") { out.add(args.mois); if (args.paiement) out.add(monthOfDate(args.paiement.date)); }
   if (op === "supprimer") out.add(args.mois);
   if (op === "tarif") args.seances.forEach((s) => { out.add(s.mois); if (s.paiement) out.add(monthOfDate(s.paiement.date)); });
+  if (op === "programmer") args.dates.forEach((d) => out.add(monthOfDate(d)));
+  if (op === "supprimerListe") args.seances.forEach((s) => out.add(s.mois));
   return [...out];
 }
 
@@ -183,6 +206,7 @@ export function ajouterSeance(docs, id, seance) {
   const d = docFor(docs, mid);
   const changes = {};
   addChanges(changes, mid, ensureBase(d, s.itemId));
+  addChanges(changes, mid, rememberEstimation(d, s.itemId));
   d.seances = { ...(d.seances || {}), [id]: s };
   addChanges(changes, mid, [`seances.${id}`]);
   addChanges(changes, mid, recomputeItem(d, s.itemId));
@@ -209,6 +233,7 @@ export function modifierSeance(docs, mois, id, patch) {
     from.seances = seances;
     addChanges(changes, mois, [`seances.${id}`]);
     addChanges(changes, dest, ensureBase(to, s.itemId));
+    addChanges(changes, dest, rememberEstimation(to, s.itemId));
     to.seances = { ...(to.seances || {}), [id]: s };
     addChanges(changes, dest, [`seances.${id}`]);
     addChanges(changes, dest, recomputeItem(to, s.itemId));
@@ -323,6 +348,73 @@ export function appliquerTarif(docs, seances, prix) {
   const changes = {};
   seances.forEach((s) => {
     Object.entries(modifierSeance(docs, s.mois, s.id, { prix })).forEach(([m, p]) => addChanges(changes, m, p));
+  });
+  return changes;
+}
+
+// ---- Programmation automatique (séances récurrentes) ----
+export const MAX_PROGRAMMATION = 200;
+
+// Dates des séances d'une programmation : chaque jour de la semaine de `jours` (0 = dimanche,
+// 1 = lundi… comme Date.getDay) à `heure` ("HH:MM"), du `du` au `au` inclus ("AAAA-MM-JJ").
+// Calcul en UTC : pas de décalage au changement d'heure été / hiver.
+export function datesRecurrentes({ jours, heure, du, au }) {
+  if (!Array.isArray(jours) || !jours.length || jours.some((j) => !(Number.isInteger(j) && j >= 0 && j <= 6))) {
+    throw new Error("Choisir au moins un jour de la semaine");
+  }
+  if (!/^\d{2}:\d{2}$/.test(heure || "")) throw new Error("Heure invalide");
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(du || "") || !/^\d{4}-\d{2}-\d{2}$/.test(au || "")) throw new Error("Période invalide");
+  if (au < du) throw new Error("La date de fin est avant la date de début");
+  const [y1, m1, d1] = du.split("-").map(Number);
+  const [y2, m2, d2] = au.split("-").map(Number);
+  const fin = Date.UTC(y2, m2 - 1, d2);
+  const out = [];
+  for (let t = Date.UTC(y1, m1 - 1, d1); t <= fin; t += 86400000) {
+    const d = new Date(t);
+    if (!jours.includes(d.getUTCDay())) continue;
+    out.push(`${d.toISOString().slice(0, 10)}T${heure}`);
+    if (out.length > MAX_PROGRAMMATION) throw new Error(`Trop de séances d'un coup (maximum ${MAX_PROGRAMMATION})`);
+  }
+  return out;
+}
+
+// Crée une séance « prévue » par date (`base` = { itemId, eleveId, prix, serieId }). Une date où
+// l'élève a déjà une séance non annulée à la même heure est ignorée (pas de doublon).
+// `newId()` fournit les identifiants. Renvoie { changes, creees, ignorees }.
+export function programmerSeances(docs, base, dates, newId) {
+  const changes = {};
+  const creees = [];
+  const ignorees = [];
+  dates.forEach((date) => {
+    const d = docFor(docs, monthOfDate(date));
+    const doublon = Object.values(d.seances || {}).some((s) =>
+      s && s.itemId === base.itemId && s.eleveId === base.eleveId && s.date === date && s.statut !== "annulee");
+    if (doublon) { ignorees.push(date); return; }
+    const c = ajouterSeance(docs, newId(), { ...base, date, statut: "prevue", paiement: null });
+    Object.entries(c).forEach(([m, p]) => addChanges(changes, m, p));
+    creees.push(date);
+  });
+  return { changes, creees, ignorees };
+}
+
+// Séances d'une série encore modifiables à partir de `depuis` ("AAAA-MM-JJTHH:MM" inclus) :
+// prévues et non payées (celles faites ou payées restent). `months` = [{ id, data }].
+export function seancesSerie(months, serieId, depuis) {
+  const out = [];
+  months.forEach(({ id, data }) => {
+    Object.entries((data && data.seances) || {}).forEach(([sid, s]) => {
+      if (!s || !serieId || s.serieId !== serieId) return;
+      if (s.statut !== "prevue" || s.paiement || s.date < depuis) return;
+      out.push({ id: sid, mois: id, ...s });
+    });
+  });
+  return out.sort((a, b) => (a.date < b.date ? -1 : 1));
+}
+
+export function supprimerSeances(docs, seances) {
+  const changes = {};
+  seances.forEach((s) => {
+    Object.entries(supprimerSeance(docs, s.mois, s.id)).forEach(([m, p]) => addChanges(changes, m, p));
   });
   return changes;
 }
