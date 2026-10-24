@@ -627,6 +627,51 @@ body {
 .tarif-prompt small { color: var(--text-muted); }
 .tarif-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 
+/* Zone « À traiter » (journal fermé) */
+.sx-todo {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 10px;
+  border-radius: 12px;
+  background: #fff;
+  border: 1px solid #fde68a;
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
+}
+.sx-todo-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 0 2px 2px; }
+.sx-todo-head b { font-size: 13px; }
+.sx-todo-head span { flex: 1; font-size: 12px; color: var(--text-muted); }
+.sx-todo-all { padding: 4px 10px; font-size: 12px; }
+.sx-todo-row {
+  display: grid;
+  grid-template-columns: auto 1fr auto auto;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 4px;
+  border-top: 1px solid #f1f2f4;
+}
+.sx-todo-info { min-width: 0; display: flex; flex-direction: column; }
+.sx-todo-info b { font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sx-todo-info small { font-size: 12px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sx-todo-actions { display: flex; gap: 4px; }
+.sx-todo-actions .sx-btn { padding: 5px 10px; }
+.sx-todo-pay { background: var(--bg); font-size: 15px; padding: 3px 10px; }
+.sx-todo-more {
+  align-self: flex-start;
+  border: none;
+  background: none;
+  padding: 4px 2px 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--sx-accent);
+  cursor: pointer;
+}
+.sx-todo-more:hover { text-decoration: underline; }
+@media (max-width: 520px) {
+  .sx-todo-row { grid-template-columns: auto 1fr auto; }
+  .sx-todo-actions { grid-column: 2 / -1; }
+}
+
 /* Prochains mois */
 .sx-futur { border-radius: 12px; background: #fff; border: 1px solid var(--border); }
 .sx-futur summary {
