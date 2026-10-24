@@ -220,6 +220,11 @@ export function modifierSeance(docs, mois, id, patch) {
   const s = { ...before, ...patch };
   validate(s);
   if (s.statut === "annulee" && s.paiement) throw new Error("Séance payée : annuler d'abord le paiement");
+  // Une séance doit être faite pour être payée : une fois payée, elle ne repasse pas « pas faite »
+  // sans annuler d'abord le paiement.
+  if (before.statut === "faite" && s.statut !== "faite" && s.paiement) {
+    throw new Error("Séance payée : annuler d'abord le paiement pour la marquer non faite");
+  }
   const changes = {};
   const dest = monthOfDate(s.date);
   const from = docFor(docs, mois);
@@ -260,6 +265,7 @@ export function payerSeance(docs, mois, id, mode, date) {
   const s = getSeance(docs, mois, id);
   if (s.statut === "annulee") throw new Error("Séance annulée");
   if (s.paiement) throw new Error("Séance déjà payée");
+  if (s.statut !== "faite") throw new Error("Marquer d'abord la séance faite pour enregistrer son paiement");
   const changes = {};
   const d = docFor(docs, mois);
   d.seances = { ...d.seances, [id]: { ...s, paiement: { mode, date } } };
@@ -450,16 +456,6 @@ export function seancesATraiter(data, mois, arr, itemId, maintenant) {
     out.push({ ...s });
   });
   return out.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
-}
-
-// Paiement en un geste : une séance encore « prévue » (déjà passée) est aussi marquée faite.
-export function payerEtFaire(docs, mois, id, mode, date) {
-  const s = getSeance(docs, mois, id);
-  const changes = {};
-  const merge = (c) => Object.entries(c).forEach(([m, p]) => addChanges(changes, m, p));
-  if (s.statut === "prevue") merge(modifierSeance(docs, mois, id, { statut: "faite" }));
-  merge(payerSeance(docs, mois, id, mode, date));
-  return changes;
 }
 
 // Plusieurs séances marquées faites d'un coup (`seances` = [{ id, mois }]).
