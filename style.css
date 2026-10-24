@@ -249,26 +249,24 @@ body {
 /* Dépense partagée = ligne principale (montant net, comme d'habitude) + sous-ligne pour le
    montant total réellement débité et le suivi du remboursement de l'autre part. */
 .expense-block { display: flex; flex-direction: column; gap: 4px; }
-.shared-sub {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-left: 26px;
-  font-size: 12px;
+/* Dépense partagée : carte légère (même famille que les revenus) */
+.shared-card { margin: 4px -10px; }
+.shared-card .label-text { display: flex; align-items: center; flex-wrap: wrap; gap: 0 6px; }
+.part-hint {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 600;
   color: var(--text-muted);
+  white-space: nowrap;
 }
-.shared-lbl { flex: none; }
-.shared-sub .shared-total-input {
-  flex: none;
-  width: 74px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 4px 6px;
-  font-size: 12px;
-}
-.shared-remb { display: flex; align-items: center; gap: 4px; white-space: nowrap; }
+.part-hint::after { content: " →"; }
+.shared-total { align-self: flex-start; margin-top: 2px; }
+.shared-total input { width: 110px; padding: 5px 24px 5px 8px; font-size: 14px; font-weight: 600; }
+.shared-states { display: flex; flex-wrap: wrap; gap: 6px; margin-left: 26px; }
+.shared-expl { margin: 0 0 0 26px; font-size: 12px; line-height: 1.4; color: var(--text-muted); }
+.shared-expl b { color: var(--text); font-weight: 600; }
 @media (max-width: 640px) {
-  .shared-sub { flex-wrap: wrap; margin-left: 22px; }
+  .part-hint { margin-left: 0; width: 100%; }
 }
 
 /* Revenu = ligne principale + sous-ligne "encaissé X sur Y" avec barre de progression */
