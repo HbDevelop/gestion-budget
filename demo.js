@@ -138,6 +138,9 @@ function buildDemoData(owners) {
   return { "meta/catalog": { items }, "meta/settings": settings, months };
 }
 
+// Marqueur de suppression d'un champ (voir deleteField du store).
+const DELETE_FIELD = Symbol("deleteField");
+
 // Stockage en mémoire qui imite les quelques appels Firestore utilisés par l'appli, adressés par
 // chemin ("meta/catalog", "months/2026-10"...).
 export function createDemoStore(owners) {
@@ -159,15 +162,25 @@ export function createDemoStore(owners) {
       docs[path] = opts && opts.merge && docs[path] ? deepMerge(docs[path], clone(value)) : clone(value);
     },
     // Champs à chemin pointé ("byScope.<owner>.epargneTaux"), comme updateDoc de Firestore.
+    // La valeur deleteField() supprime le champ.
     async updateDoc(path, fields) {
       if (!docs[path]) throw Object.assign(new Error("Document introuvable"), { code: "not-found" });
-      Object.entries(clone(fields)).forEach(([key, v]) => {
+      Object.entries(fields).forEach(([key, v]) => {
         const parts = key.split(".");
+        const last = parts.pop();
+        if (v === DELETE_FIELD) {
+          // Supprimer un champ absent ne crée pas ses parents.
+          const o = parts.reduce((acc, p) => (acc && typeof acc[p] === "object" ? acc[p] : null), docs[path]);
+          if (o) delete o[last];
+          return;
+        }
         let o = docs[path];
-        parts.slice(0, -1).forEach((p) => { o = o[p] = o[p] && typeof o[p] === "object" ? o[p] : {}; });
-        o[parts[parts.length - 1]] = v;
+        parts.forEach((p) => { o = o[p] = o[p] && typeof o[p] === "object" ? o[p] : {}; });
+        o[last] = clone(v);
       });
     },
+    // Équivalent de deleteField() de Firestore, pour updateDoc.
+    deleteField() { return DELETE_FIELD; },
     // Seule collection lue en entier par l'appli : les mois, triés par identifiant.
     async getDocs(collectionPath) {
       const prefix = collectionPath + "/";

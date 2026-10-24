@@ -163,3 +163,120 @@ export function cloneForNewMonth(prev) {
   });
   return { values, bankBalances: {} };
 }
+
+// ---- Enregistrement d'un mois : uniquement les champs modifiés ----
+// Le document months/<AAAA-MM> n'est jamais réécrit en entier une fois créé : deux appareils
+// ouverts sur le même mois écraseraient sinon les saisies l'un de l'autre avec leur copie
+// périmée. Chaque modification renvoie les chemins des champs touchés ("values.<poste>.amount",
+// "bankBalances.<espace>"...), qu'on cumule jusqu'à l'enregistrement : updateDoc ne réécrit
+// que ces champs-là.
+//
+// `store` = { getDoc(path), setDoc(path, value), updateDoc(path, fields), deleteField() } :
+// Firestore ou le stockage de la démo (voir monthStore dans app.js), adressés par chemin.
+
+export function monthPath(id) { return `months/${id}`; }
+
+// Nouvelle valeur d'un poste. Chemins champ par champ (montant, payé, encaissé...) : deux
+// appareils qui touchent des champs différents du même poste ne s'écrasent pas non plus.
+export function setItemValue(data, itemId, next) {
+  if (!data.values) data.values = {};
+  const before = data.values[itemId] || {};
+  data.values[itemId] = next;
+  const keys = new Set([...Object.keys(before), ...Object.keys(next)]);
+  return [...keys].filter((k) => before[k] !== next[k]).map((k) => `values.${itemId}.${k}`);
+}
+
+// Solde bancaire d'un espace. Ancien format (un seul nombre `bankBalance`) : converti ici
+// comme avant, en écrivant chaque seau du nouveau format et en supprimant l'ancien champ.
+export function setBankBalance(data, scope, value) {
+  const legacy = !(data.bankBalances && typeof data.bankBalances === "object");
+  data.bankBalances = bankBalancesOf(data);
+  data.bankBalances[scope] = value;
+  const paths = (legacy ? Object.keys(data.bankBalances) : [scope]).map((k) => `bankBalances.${k}`);
+  if ("bankBalance" in data) {
+    delete data.bankBalance;
+    paths.push("bankBalance");
+  }
+  return paths;
+}
+
+export function setCashBalance(data, scope, value) {
+  data.cashBalances = { ...cashBalancesOf(data), [scope]: value };
+  return [`cashBalances.${scope}`];
+}
+
+// Modifications pas encore enregistrées (chemins de champs, sans doublon).
+export function createChangeSet() {
+  let paths = new Set();
+  return {
+    add(list) { list.forEach((p) => paths.add(p)); },
+    take() {
+      const out = [...paths];
+      paths = new Set();
+      return out;
+    },
+    get size() { return paths.size; }
+  };
+}
+
+// Champs à envoyer à updateDoc : valeur actuelle de chaque chemin dans `data`, ou
+// `deleteValue` si le champ a disparu. Un chemin dont un parent est déjà envoyé est inutile
+// (et Firestore refuse un champ et son parent dans la même mise à jour).
+export function monthPatch(data, paths, deleteValue) {
+  const uniq = [...new Set(paths)];
+  const fields = {};
+  uniq
+    .filter((p) => !uniq.some((q) => p.startsWith(q + ".")))
+    .forEach((p) => {
+      const v = p.split(".").reduce((o, k) => (o && typeof o === "object" ? o[k] : undefined), data);
+      fields[p] = v === undefined ? deleteValue : v;
+    });
+  return fields;
+}
+
+// Enregistre les champs modifiés d'un mois existant (+ updatedAt/updatedBy dans `meta`).
+// Document introuvable (supprimé ailleurs) : on le recrée avec la copie locale.
+export async function saveMonthChanges(store, id, data, paths, meta) {
+  if (!paths.length) return;
+  const fields = { ...monthPatch(data, paths, store.deleteField()), ...meta };
+  try {
+    await store.updateDoc(monthPath(id), fields);
+  } catch (e) {
+    if (!e || e.code !== "not-found") throw e;
+    await store.setDoc(monthPath(id), { ...data, ...meta });
+  }
+}
+
+// Création d'un mois (seule écriture du document entier). S'il a été créé entre-temps sur un
+// autre appareil, on ne l'écrase pas : on renvoie sa version en base ({ created: false }).
+export async function createMonth(store, id, data, meta) {
+  const snap = await store.getDoc(monthPath(id));
+  if (snap.exists()) return { created: false, data: snap.data() };
+  await store.setDoc(monthPath(id), { ...data, ...meta });
+  return { created: true, data };
+}
+
+// Prévisions : nouveau montant d'un poste sur un mois. `data` = copie locale du mois, ou null
+// s'il n'existe pas encore : il est alors créé à partir de `source` (cloneForNewMonth).
+// Renvoie la copie locale à jour du mois.
+export async function saveForecastValue(store, id, data, source, item, itemId, value, meta) {
+  const apply = (d) => setItemValue(d, itemId, withIncomeAmount(item, (d.values && d.values[itemId]) || { amount: 0, paid: false }, value));
+  if (!data) {
+    const fresh = cloneForNewMonth(source);
+    apply(fresh);
+    const res = await createMonth(store, id, fresh, meta);
+    if (res.created) return fresh;
+    data = res.data;
+  }
+  await saveMonthChanges(store, id, data, apply(data), meta);
+  return data;
+}
+
+// Suppression d'un poste : son montant est remis à 0 sur chacun des mois `ids` (copies
+// locales dans `monthsById`), sans toucher au reste de ces mois.
+export async function zeroItemInMonths(store, ids, monthsById, itemId, meta) {
+  for (const id of ids) {
+    const data = monthsById[id];
+    await saveMonthChanges(store, id, data, setItemValue(data, itemId, { ...data.values[itemId], amount: 0 }), meta);
+  }
+}
