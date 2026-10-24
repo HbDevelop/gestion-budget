@@ -95,6 +95,7 @@ export function computeTotals(cat, data, scope = "famille") {
   let epargneIn = 0;          // "Virement de l'épargne" : reprise sur la réserve, pas un vrai revenu
   let revenusAVenir = 0;      // revenus du mois pas encore cochés "reçu"
   let especesRecues = 0;      // revenus déjà encaissés en espèces (hors compte bancaire)
+  let virementsRecus = 0;     // revenus déjà arrivés sur le compte par virement (hors reprise sur l'épargne)
   const byGroup = { regulieres: 0, occasionnelles: 0, capital: 0 };
   let chargesAVenir = 0;      // charges réelles (régulières/occasionnelles) pas encore payées
   let capitalAVenir = 0;      // épargne/investissement du mois pas encore fait(e)
@@ -109,6 +110,8 @@ export function computeTotals(cat, data, scope = "famille") {
       // Seulement les revenus prévus ce mois (montant > 0), comme ceux affichés dans le Suivi :
       // un poste remis à 0 garde son ancien `receivedCash` en base, invisible et non modifiable.
       if (amount > 0) especesRecues += cashOf(v);
+      // Même règle, et sans la reprise sur l'épargne : c'est un transfert interne, pas un revenu.
+      if (amount > 0 && item.role !== "epargne_out") virementsRecus += virementOf(v);
     } else {
       byGroup[item.type] = (byGroup[item.type] || 0) + amount;
       if (isShared(item)) {
@@ -152,7 +155,7 @@ export function computeTotals(cat, data, scope = "famille") {
   // Solde projeté fin de mois : + les revenus encore à encaisser. Chiffre stable qui ne
   // saute pas selon la date à laquelle le salaire (ou les versements de l'Etude) tombent.
   const soldeProjete = disponible + revenusAVenir - aVenirTotal;
-  return { totalIncome, revenusReels, epargneIn, revenusAVenir, especesRecues, byGroup, totalExpenses, depensesReelles, balance, chargesAVenir, capitalAVenir, resteAVivreReel, soldeProjete, bankBalance, cashBalance };
+  return { totalIncome, revenusReels, epargneIn, revenusAVenir, especesRecues, virementsRecus, byGroup, totalExpenses, depensesReelles, balance, chargesAVenir, capitalAVenir, resteAVivreReel, soldeProjete, bankBalance, cashBalance };
 }
 
 // Nouveau mois : mêmes montants que le mois source, rien de payé/reçu, soldes à saisir.

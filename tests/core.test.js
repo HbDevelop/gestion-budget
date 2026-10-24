@@ -45,6 +45,7 @@ describe("computeTotals", () => {
       totalIncome: 4500, revenusReels: 4000, epargneIn: 500,
       revenusAVenir: 1160,   // 500 reprise + 600 étude + 60 part de l'autre (dépense partagée)
       especesRecues: 150,    // le revenu à 0 € n'est pas compté
+      virementsRecus: 3250,  // 3000 salaire + 250 étude (400 reçus - 150 espèces), hors reprise épargne
       byGroup: { regulieres: 1260, occasionnelles: 0, capital: 300 },
       totalExpenses: 1560, depensesReelles: 1260, balance: 2940,
       chargesAVenir: 120,    // partagée non payée : montant total par défaut = 2 × 60
@@ -55,7 +56,7 @@ describe("computeTotals", () => {
 
   test("espace marwa (ancien revenu sans `received`, payé = tout reçu)", () => {
     assert.deepEqual(computeTotals(catalog, month(), "marwa"), {
-      totalIncome: 2000, revenusReels: 2000, epargneIn: 0, revenusAVenir: 0, especesRecues: 0,
+      totalIncome: 2000, revenusReels: 2000, epargneIn: 0, revenusAVenir: 0, especesRecues: 0, virementsRecus: 2000,
       byGroup: { regulieres: 0, occasionnelles: 100, capital: 200 },
       totalExpenses: 300, depensesReelles: 100, balance: 1700,
       chargesAVenir: 100, capitalAVenir: 0,
@@ -66,7 +67,7 @@ describe("computeTotals", () => {
   test("vue famille = somme des espaces", () => {
     const fam = computeTotals(catalog, month(), "famille");
     assert.deepEqual(fam, {
-      totalIncome: 6500, revenusReels: 6000, epargneIn: 500, revenusAVenir: 1160, especesRecues: 150,
+      totalIncome: 6500, revenusReels: 6000, epargneIn: 500, revenusAVenir: 1160, especesRecues: 150, virementsRecus: 5250,
       byGroup: { regulieres: 1260, occasionnelles: 100, capital: 500 },
       totalExpenses: 1860, depensesReelles: 1360, balance: 4640,
       chargesAVenir: 220, capitalAVenir: 300,
@@ -80,6 +81,18 @@ describe("computeTotals", () => {
     assert.equal(computeTotals(catalog, data, "habib").especesRecues, 0);
     data.values["zero-h"].amount = 100;
     assert.equal(computeTotals(catalog, data, "habib").especesRecues, 80);
+  });
+
+  test("virements reçus : part virement de l'encaissé, hors reprise sur l'épargne et revenus à 0", () => {
+    const data = { values: {
+      "sal-h": { amount: 3000, received: 1200, receivedCash: 200 },
+      "rep-h": { amount: 500, received: 500, receivedCash: 0, paid: true },
+      "zero-h": { amount: 0, received: 80, receivedCash: 0 }
+    } };
+    assert.equal(computeTotals(catalog, data, "habib").virementsRecus, 1000);
+    data.values["zero-h"].amount = 100;
+    assert.equal(computeTotals(catalog, data, "habib").virementsRecus, 1080);
+    assert.equal(computeTotals(catalog, { values: {} }, "habib").virementsRecus, 0);
   });
 
   test("dépense partagée : montantTotal saisi et remboursement reçu", () => {
