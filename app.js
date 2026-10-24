@@ -609,9 +609,9 @@ function buildIncomeRow(item) {
   // L'encaissé est réparti entre virement (arrive sur le compte) et espèces (en main).
   const recu = el("div", "income-recu");
   recu.innerHTML =
-    `<span class="recu-lbl">virement</span>` +
+    `<span class="recu-lbl lbl-virement">${MODE_ICON.virement}virement</span>` +
     `<input type="number" class="recu-input recu-vir" value="${virementOf(v0)}" step="0.01" aria-label="Montant encaissé par virement" />` +
-    `<span class="recu-lbl">espèces</span>` +
+    `<span class="recu-lbl lbl-especes">${MODE_ICON.especes}espèces</span>` +
     `<input type="number" class="recu-input recu-cash" value="${cashOf(v0)}" step="0.01" aria-label="Montant encaissé en espèces" />`;
   const bar = el("div", "sx-bar", `<i class="sx-bar-vir"></i><i class="sx-bar-cash"></i>`);
   block.append(row, stats, recu, bar);
@@ -801,7 +801,7 @@ function buildSeancesBlock(item) {
   const stats = el("div", "sx-stats");
   stats.innerHTML =
     `<div class="sx-stat sx-stat-ok"><span>Encaissé</span><b>${euros(recu)}</b>` +
-      `<small>💳 ${euros(virementOf(v))} · 💶 ${euros(cashOf(v))}</small></div>` +
+      `<small class="mode-split">${modeTag("virement", euros(virementOf(v)))}${modeTag("especes", euros(cashOf(v)))}</small></div>` +
     `<div class="sx-stat${aVenir > 0 ? " sx-stat-due" : ""}"><span>Reste dû</span><b>${euros(aVenir)}</b>` +
       (full ? `<small>tout est payé ✓</small>` : "") + `</div>` +
     `<div class="sx-stat"><span>Séances</span><b>${actives.length}</b>` +
@@ -887,7 +887,7 @@ function seanceRow(item, s, mois, mode = "courant") {
     prevue: `<span class="chip chip-prevue">Prévue</span>`
   }[etat];
   const paye = s.paiement
-    ? `<span class="chip chip-payee">${s.paiement.mode === "especes" ? "💶 Espèces" : "💳 Virement"} · ${shortDate(s.paiement.date)}</span>`
+    ? `<span class="chip chip-payee chip-${s.paiement.mode}">${MODE_ICON[s.paiement.mode]}${MODE_LABEL[s.paiement.mode]} · ${shortDate(s.paiement.date)}</span>`
     : etat === "annulee" ? "" : `<span class="chip chip-due">Non payée</span>`;
   card.innerHTML =
     `<div class="sx-date"><b>${j}</b><span>${jour}</span><small>${arriere ? monthLabelShort(mois) : t}</small></div>
@@ -916,21 +916,19 @@ function seanceRow(item, s, mois, mode = "courant") {
     const aVenir = mode === "avenir";
     if (!s.paiement && aVenir) {
       if (s.statut === "prevue") btn(menu, "Annuler la séance", "sx-menu-item", () => patch({ statut: "annulee" }));
-    } else if (!s.paiement && s.statut !== "faite") {
-      // Le paiement n'est possible qu'une fois la séance marquée faite.
-      actions.appendChild(el("span", "pay-hint", "Marquer faite pour enregistrer le paiement"));
-      btn(menu, "Annuler la séance", "sx-menu-item", () => patch({ statut: "annulee" }));
     } else if (!s.paiement) {
-      const pay = el("div", "sx-pay");
+      // Paiement : boutons toujours visibles, actifs seulement une fois la séance faite.
+      const faite = s.statut === "faite";
+      const pay = el("div", "sx-pay" + (faite ? "" : " is-off"));
       const date = el("input", "sx-paydate");
       date.type = "date";
       date.value = todayStr();
+      date.disabled = !faite;
       date.title = "Date du paiement (compté dans ce mois-là)";
       pay.appendChild(date);
-      const payer = (mode) => runSeanceOp("payer", { mois, date: date.value }, (docs) => payerSeance(docs, mois, s.id, mode, date.value));
-      btn(pay, "💳 Virement", "sx-btn sx-btn-pay", () => payer("virement"));
-      btn(pay, "💶 Espèces", "sx-btn sx-btn-pay", () => payer("especes"));
+      payButtons(pay, faite, (m) => runSeanceOp("payer", { mois, date: date.value }, (docs) => payerSeance(docs, mois, s.id, m, date.value)));
       actions.appendChild(pay);
+      if (!faite) btn(menu, "Annuler la séance", "sx-menu-item", () => patch({ statut: "annulee" }));
     } else {
       btn(menu, "Annuler le paiement", "sx-menu-item", () => {
         if (!confirm("Annuler le paiement de cette séance ?")) return;
@@ -973,6 +971,30 @@ function seanceRow(item, s, mois, mode = "courant") {
   more.appendChild(menu);
   if (menu.children.length) card.appendChild(more);
   return card;
+}
+
+// Modes de paiement : virement en bleu (flèches de transfert), espèces en ambre (billet).
+// Mêmes couleurs et icônes partout (boutons, pastilles, détail de l'encaissé, barres).
+const MODE_ICON = {
+  virement: `<svg class="mode-ico" viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 5.5h10m0 0L10 3m2.5 2.5L10 8M13.5 10.5h-10m0 0L6 8m-2.5 2.5L6 13" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>`,
+  especes: `<svg class="mode-ico" viewBox="0 0 16 16" aria-hidden="true"><rect x="1.5" y="4" width="13" height="8" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.5"/><circle cx="8" cy="8" r="1.9" fill="none" stroke="currentColor" stroke-width="1.5"/><path d="M4 6.2v3.6M12 6.2v3.6" stroke="currentColor" stroke-width="1.3" stroke-linecap="round"/></svg>`
+};
+const MODE_LABEL = { virement: "Virement", especes: "Espèces" };
+function modeTag(mode, texte) {
+  return `<span class="mode-tag mode-${mode}">${MODE_ICON[mode]}${texte}</span>`;
+}
+
+// Boutons « Virement » / « Espèces » : toujours visibles, grisés tant que la séance n'est pas
+// marquée faite (obligatoire avant le paiement).
+function payButtons(parent, actif, payer) {
+  ["virement", "especes"].forEach((mode) => {
+    const b = el("button", `pay-btn pay-${mode}`, `${MODE_ICON[mode]}<span>${MODE_LABEL[mode]}</span>`);
+    b.type = "button";
+    b.disabled = !actif;
+    b.title = actif ? `Payée par ${mode === "especes" ? "espèces" : "virement"}` : "Marquer la séance faite d'abord";
+    b.addEventListener("click", () => payer(mode));
+    parent.appendChild(b);
+  });
 }
 
 // Interrupteur « Faite » d'une séance (journal et zone « À traiter »). Obligatoire avant tout
@@ -1042,14 +1064,11 @@ function aTraiterZone(item, arr) {
     actions.appendChild(faiteToggle(s, () => statut(s.statut === "faite" ? "prevue" : "faite")));
     const payer = (mode) => runSeanceOp("payer", { mois: s.mois, date: todayStr() }, (docs) => {
       const ch = payerSeance(docs, s.mois, s.id, mode, todayStr());
-      seancesFlash = { itemId: item.id, html: `✓ ${escapeHtml(nom)} · ${euros(s.prix)} encaissés ${mode === "especes" ? "en espèces 💶" : "par virement 💳"}.` };
+      seancesFlash = { itemId: item.id, html: `✓ ${escapeHtml(nom)} · ${euros(s.prix)} encaissés ${modeTag(mode, mode === "especes" ? "en espèces" : "par virement")}.` };
       return ch;
     });
-    // Paiement seulement une fois la séance faite (et pas déjà payée).
-    if (s.statut === "faite" && !s.paiement) {
-      btn(actions, "💳", "sx-btn sx-btn-pay sx-todo-pay", "Payée par virement aujourd'hui", () => payer("virement"));
-      btn(actions, "💶", "sx-btn sx-btn-pay sx-todo-pay", "Payée en espèces aujourd'hui", () => payer("especes"));
-    }
+    // Paiement (daté d'aujourd'hui) : boutons grisés tant que la séance n'est pas faite.
+    if (!s.paiement) payButtons(actions, s.statut === "faite", payer);
     row.appendChild(actions);
     zone.appendChild(row);
   });

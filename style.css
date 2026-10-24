@@ -370,7 +370,7 @@ body {
 .sx-bar { display: flex; height: 4px; margin-left: 26px; border-radius: 999px; background: #e9edf2; overflow: hidden; }
 .sx .sx-bar { background: #ece6fb; }
 .sx-bar i { display: block; height: 100%; transition: width 0.3s ease; }
-.sx-bar-vir { background: linear-gradient(90deg, #10b981, #059669); }
+.sx-bar-vir { background: linear-gradient(90deg, #60a5fa, #2563eb); }
 .sx-bar-cash { background: linear-gradient(90deg, #fbbf24, #f59e0b); }
 .sx-meta {
   display: flex;
@@ -556,6 +556,8 @@ body {
   white-space: nowrap;
 }
 .chip-faite, .chip-payee { background: var(--sx-ok-soft); color: var(--sx-ok); }
+.chip-payee.chip-virement { background: #eff6ff; color: #1d4ed8; }
+.chip-payee.chip-especes { background: #fffbeb; color: #b45309; }
 .chip-prevue { background: var(--sx-info-soft); color: var(--sx-info); }
 .chip-confirmer, .chip-due { background: var(--sx-warn-soft); color: var(--sx-warn); }
 .chip-annulee { background: #f1f5f9; color: #64748b; }
@@ -584,8 +586,39 @@ body {
   transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
 .sx-btn:hover { border-color: #c4b5fd; color: var(--sx-accent); }
-.sx-btn-pay { border-color: transparent; }
-.sx-btn-pay:hover { background: var(--sx-ok-soft); color: var(--sx-ok); border-color: transparent; }
+/* Modes de paiement : virement bleu, espèces ambre (icône + libellé) */
+.mode-ico { width: 14px; height: 14px; flex: none; vertical-align: -2px; }
+.chip .mode-ico { width: 12px; height: 12px; margin-right: 1px; }
+.mode-tag { display: inline-flex; align-items: center; gap: 3px; font-weight: 600; white-space: nowrap; }
+.mode-tag .mode-ico { width: 12px; height: 12px; }
+.mode-virement { color: #1d4ed8; }
+.mode-especes { color: #b45309; }
+.mode-split { display: flex; flex-wrap: wrap; gap: 2px 10px; }
+.lbl-virement, .lbl-especes { display: inline-flex; align-items: center; gap: 3px; font-weight: 600; }
+.lbl-virement { color: #1d4ed8; }
+.lbl-especes { color: #b45309; }
+.lbl-virement .mode-ico, .lbl-especes .mode-ico { width: 12px; height: 12px; }
+.pay-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 11px;
+  border-radius: 999px;
+  border: 1px solid transparent;
+  font-family: inherit;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background-color 0.15s ease, border-color 0.15s ease, color 0.15s ease, opacity 0.15s ease;
+}
+.pay-virement { background: #eff6ff; border-color: #bfdbfe; color: #1d4ed8; }
+.pay-virement:hover:not(:disabled) { background: #dbeafe; border-color: #93c5fd; }
+.pay-especes { background: #fffbeb; border-color: #fde68a; color: #b45309; }
+.pay-especes:hover:not(:disabled) { background: #fef3c7; border-color: #fcd34d; }
+.pay-btn:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.25); }
+.pay-btn:disabled { background: #f3f4f6; border-color: #e5e7eb; color: #9ca3af; cursor: not-allowed; }
+.sx-pay.is-off .sx-paydate { opacity: 0.5; }
 .sx-btn-primary { background: var(--sx-accent); border-color: var(--sx-accent); color: #fff; }
 .sx-btn-primary:hover { background: #6d28d9; color: #fff; border-color: #6d28d9; }
 .sx-paydate, .sx-form input, .sx-form select, .sx-eleve input[type="text"], .sx-euro input {
@@ -776,7 +809,6 @@ body {
 .fait-toggle.on .fait-knob { transform: translateX(12px); }
 .fait-toggle.locked { cursor: not-allowed; opacity: 0.85; }
 .fait-toggle.locked:hover { border-color: #a7f3d0; }
-.pay-hint { font-size: 11.5px; color: var(--text-muted); font-style: italic; }
 
 /* Zone « À traiter » (journal fermé) : petites lignes indentées, filet à gauche */
 .sx-todo {
@@ -811,7 +843,7 @@ body {
 .sx-todo-row .chip { font-size: 11px; padding: 1px 7px; }
 .sx-todo-actions { display: flex; gap: 4px; }
 .sx-todo-actions .sx-btn { padding: 3px 9px; font-size: 12px; }
-.sx-todo-pay { background: var(--bg); font-size: 13px; padding: 2px 8px; }
+.sx-todo-actions .pay-btn { padding: 3px 9px; font-size: 12px; }
 .sx-todo-more {
   align-self: flex-start;
   border: none;
@@ -916,7 +948,7 @@ body {
   /* Paiement : date sur une ligne, les deux modes côte à côte en dessous. */
   .sx-pay { display: grid; grid-template-columns: 1fr 1fr; width: 100%; border-radius: 12px; }
   .sx-paydate { grid-column: 1 / -1; }
-  .sx-btn-pay { text-align: center; }
+  .sx-pay .pay-btn { justify-content: center; }
   .sx-prog summary small { display: none; }
   .sx-days { gap: 4px; }
   .sx-day span { width: 33px; height: 33px; }
