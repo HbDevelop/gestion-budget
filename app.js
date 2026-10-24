@@ -7,7 +7,7 @@ import {
   getFirestore, doc, getDoc as fbGetDoc, setDoc as fbSetDoc, updateDoc as fbUpdateDoc, deleteField,
   collection, getDocs as fbGetDocs, query, orderBy
 } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
-import { isDemoEmail, createDemoStore, DEMO_LABELS } from "./demo.js?v=5";
+import { isDemoEmail, createDemoStore, DEMO_LABELS } from "./demo.js?v=6";
 import {
   monthId, addMonths, isActiveAt, inScope, isShared, receivedOf, cashOf, virementOf,
   withIncomeAmount, sumBankBalances, bankFor, cashFor, computeTotals, cloneForNewMonth,
@@ -16,8 +16,8 @@ import {
 } from "./budget-core.js?v=3";
 import {
   isSeancesItem, hasSeances, seancesOfItem, monthOfDate, monthsNeeded, ajouterSeance, modifierSeance,
-  payerSeance, annulerPaiement, supprimerSeance, arrieres, elevesOf
-} from "./seances.js?v=1";
+  payerSeance, annulerPaiement, supprimerSeance, arrieres, elevesOf, seancesATarifer, appliquerTarif
+} from "./seances.js?v=2";
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -201,6 +201,10 @@ let forecastEdit = false;
 // revenus à venir du mois en cours ; et journaux de séances ouverts dans le Suivi.
 let arrieresSeances = { parPoste: {}, liste: [] };
 const seancesOuverts = new Set();
+// Liste « Élèves » restée ouverte entre deux affichages, et changement de tarif en attente du
+// choix de l'utilisateur (quelles séances passent au nouveau prix).
+const elevesOuverts = new Set();
+let tarifEnAttente = null;
 let charts = {
   pie: null, pieAvg: null, line: null, investment: null, cap: null, balance: null, occTop: null,
   famIncome: null, famSplit: null, famStack: null
@@ -894,6 +898,9 @@ function elevesEditor(item) {
   const box = el("details", "eleves-box");
   const list = elevesOf(item);
   box.innerHTML = `<summary>Élèves (${list.filter((e) => e.actif !== false).length})</summary>`;
+  box.addEventListener("toggle", () => {
+    if (box.open) elevesOuverts.add(item.id); else elevesOuverts.delete(item.id);
+  });
   const save = async () => {
     await withSaveStatus(() => persistCatalog(catalog));
     render();
@@ -910,16 +917,30 @@ function elevesEditor(item) {
       const nom = ev.target.value.trim();
       if (nom) { target().nom = nom; save(); }
     });
-    row.querySelector(".eleve-tarif").addEventListener("change", (ev) => {
+    row.querySelector(".eleve-tarif").addEventListener("change", async (ev) => {
+      const ancien = target().tarif;
       const t = parseFloat(ev.target.value);
-      target().tarif = t >= 0 ? t : null;
-      save();
+      const nouveau = t >= 0 ? t : null;
+      target().tarif = nouveau;
+      await withSaveStatus(() => persistCatalog(catalog));
+      // Séances déjà enregistrées : on propose de les passer au nouveau tarif.
+      tarifEnAttente = null;
+      if (typeof nouveau === "number" && nouveau !== ancien) {
+        const months = await monthsForTarif();
+        const toutes = seancesATarifer(months, item.id, e.id, ancien);
+        if (toutes.length) {
+          const avenir = seancesATarifer(months, item.id, e.id, ancien, { depuis: todayStr() });
+          tarifEnAttente = { itemId: item.id, eleveId: e.id, ancien, nouveau, avenir, toutes };
+        }
+      }
+      render();
     });
     row.querySelector(".eleve-actif input").addEventListener("change", (ev) => {
       target().actif = ev.target.checked;
       save();
     });
     box.appendChild(row);
+    if (tarifEnAttente && tarifEnAttente.itemId === item.id && tarifEnAttente.eleveId === e.id) box.appendChild(tarifPrompt(e));
   });
   const add = el("form", "eleve-row eleve-add");
   add.innerHTML =
@@ -938,7 +959,39 @@ function elevesEditor(item) {
     save();
   });
   box.appendChild(add);
-  if (!list.length) box.open = true;
+  if (!list.length || elevesOuverts.has(item.id) || (tarifEnAttente && tarifEnAttente.itemId === item.id)) box.open = true;
+  return box;
+}
+
+// Tous les mois, avec la copie locale du mois affiché (peut-être pas encore enregistrée).
+async function monthsForTarif() {
+  const months = await fetchAllMonthsAsc();
+  return months.map((m) => (m.id === currentMonthId && monthData ? { id: m.id, data: monthData } : m));
+}
+
+// Choix après un changement de tarif : séances à venir, toutes les non payées, ou aucune.
+function tarifPrompt(eleve) {
+  const p = tarifEnAttente;
+  const box = el("div", "tarif-prompt",
+    `<span>Nouveau tarif de <b>${escapeHtml(eleve.nom)}</b> : <b>${euros(p.nouveau)}</b>` +
+    (typeof p.ancien === "number" ? ` (avant ${euros(p.ancien)})` : "") +
+    `. Mettre à jour ses séances non payées ?</span>` +
+    `<small>Les séances payées, annulées ou à un prix ajusté à la main ne changent pas.</small>`);
+  const actions = el("div", "tarif-actions");
+  const btn = (label, cls, seances) => {
+    const b = el("button", "btn small " + cls, label);
+    b.type = "button";
+    b.addEventListener("click", () => {
+      tarifEnAttente = null;
+      if (!seances) { render(); return; }
+      runSeanceOp("tarif", { seances }, (docs) => appliquerTarif(docs, seances, p.nouveau));
+    });
+    actions.appendChild(b);
+  };
+  if (p.avenir.length) btn(`Séances à venir (${p.avenir.length})`, "primary", p.avenir);
+  if (p.toutes.length > p.avenir.length) btn(`Toutes les non payées (${p.toutes.length})`, "", p.toutes);
+  btn("Ne rien changer", "", null);
+  box.appendChild(actions);
   return box;
 }
 
