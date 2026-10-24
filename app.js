@@ -4,10 +4,16 @@ import {
   getAuth, GoogleAuthProvider, signInWithCredential, signOut, onAuthStateChanged
 } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-auth.js";
 import {
-  getFirestore, doc, getDoc as fbGetDoc, setDoc as fbSetDoc, updateDoc as fbUpdateDoc,
+  getFirestore, doc, getDoc as fbGetDoc, setDoc as fbSetDoc, updateDoc as fbUpdateDoc, deleteField,
   collection, getDocs as fbGetDocs, query, orderBy
 } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
-import { isDemoEmail, createDemoStore, DEMO_LABELS } from "./demo.js?v=3";
+import { isDemoEmail, createDemoStore, DEMO_LABELS } from "./demo.js?v=4";
+import {
+  monthId, addMonths, isActiveAt, inScope, isShared, receivedOf, cashOf, virementOf,
+  withIncomeAmount, sumBankBalances, bankFor, cashFor, computeTotals, cloneForNewMonth,
+  setItemValue, setBankBalance, setCashBalance, createChangeSet, saveMonthChanges, createMonth,
+  saveForecastValue, zeroItemInMonths
+} from "./budget-core.js?v=1";
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -22,6 +28,13 @@ function setDoc(ref, value, opts) { return demoStore ? demoStore.setDoc(ref.path
 function updateDoc(ref, fields) { return demoStore ? demoStore.updateDoc(ref.path, fields) : fbUpdateDoc(ref, fields); }
 // Seule requête de collection de l'appli : tous les mois (voir fetchAllMonthsAsc).
 function getDocs(q) { return demoStore ? demoStore.getDocs("months") : fbGetDocs(q); }
+// Écritures des mois (budget-core.js) : mêmes fonctions, adressées par chemin ("months/2026-10").
+const monthStore = {
+  getDoc: (path) => getDoc(doc(db, path)),
+  setDoc: (path, value) => setDoc(doc(db, path), value),
+  updateDoc: (path, fields) => updateDoc(doc(db, path), fields),
+  deleteField: () => (demoStore ? demoStore.deleteField() : deleteField())
+};
 
 // Un poste (revenu ou dépense) vit dans un catalogue partagé (doc meta/catalog) : ajouter,
 // supprimer ou renommer un poste se fait une seule fois et se répercute sur tous les mois
@@ -42,13 +55,7 @@ function reserveTagHtml(item) {
   return isReserve(item) ? ` <span class="poste-tag">${RESERVE_TAG[item.role]}</span>` : "";
 }
 
-// Dépense "partagée" : le compte de l'espace est débité du montant TOTAL, mais une autre
-// personne rembourse sa part en dehors de l'appli (espèces, virement...). Le poste garde son
-// montant net habituel (utilisé partout : Prévisions, Historique, cartes résumé) — seul le
-// Suivi du mois (mois en cours) a besoin du montant total réel + du statut du remboursement,
-// pour que "Charges à venir" / "Reste à vivre réel" / l'allocation journalière restent justes
-// entre la date du remboursement et la date du prélèvement.
-function isShared(item) { return !!(item && item.role === "partagee"); }
+// Dépense "partagée" : voir isShared (budget-core.js).
 function sharedTagHtml(item) {
   return isShared(item) ? ` <span class="poste-tag poste-tag-shared">partagée</span>` : "";
 }
@@ -120,10 +127,6 @@ function uid() {
   return Math.random().toString(36).slice(2, 10);
 }
 
-function monthId(date) {
-  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}`;
-}
-
 function monthLabel(id) {
   const [y, m] = id.split("-").map(Number);
   const d = new Date(y, m - 1, 1);
@@ -134,12 +137,6 @@ function monthLabelShort(id) {
   const [y, m] = id.split("-").map(Number);
   const d = new Date(y, m - 1, 1);
   return d.toLocaleDateString("fr-FR", { month: "short", year: "2-digit" });
-}
-
-function addMonths(id, delta) {
-  const [y, m] = id.split("-").map(Number);
-  const d = new Date(y, m - 1 + delta, 1);
-  return monthId(d);
 }
 
 function daysInMonth(id) {
@@ -165,72 +162,6 @@ function el(tag, cls, html) {
   return node;
 }
 
-// Un poste est actif pour un mois donné s'il n'a jamais été retiré, ou s'il a été retiré
-// après ce mois (permet de garder les postes retirés visibles dans l'historique passé).
-function isActiveAt(item, monthIdStr) {
-  return !item.retiredAt || monthIdStr < item.retiredAt;
-}
-
-// Un poste est dans le périmètre du scope courant : soit on regarde la famille entière,
-// soit uniquement les postes d'un espace précis.
-function inScope(item, scope) {
-  return scope === "famille" || item.owner === scope;
-}
-
-// Solde bancaire : format { habib, marwa }. L'ancien format (un seul nombre) est rattaché à
-// l'espace de repli et converti à la première écriture ; en vue "Famille" on somme tout.
-function bankBalancesOf(data) {
-  if (!data) return {};
-  if (data.bankBalances && typeof data.bankBalances === "object") return data.bankBalances;
-  if (typeof data.bankBalance === "number") return { [FALLBACK_OWNER]: data.bankBalance };
-  return {};
-}
-
-// Montant d'un revenu déjà encaissé. Nouveau champ `received` (partiel) ; à défaut,
-// on retombe sur l'ancien booléen `paid` (tout ou rien).
-function receivedOf(v) {
-  if (!v) return 0;
-  if (typeof v.received === "number") return v.received;
-  return v.paid ? (v.amount || 0) : 0;
-}
-// Part de l'encaissé reçue en espèces (`receivedCash`) : elle n'arrive pas sur le compte,
-// mais c'est de l'argent disponible. Le reste de `received` est du virement.
-function cashOf(v) {
-  if (!v || typeof v.receivedCash !== "number") return 0;
-  return Math.min(v.receivedCash, receivedOf(v));
-}
-function virementOf(v) { return Math.max(0, receivedOf(v) - cashOf(v)); }
-// Nouveau montant d'un poste. Un revenu remis à 0 n'est plus affiché dans le Suivi : son
-// encaissé (virement/espèces) n'y serait plus modifiable, on l'efface donc avec le montant.
-function withIncomeAmount(item, v, amount) {
-  const next = { ...v, amount };
-  if (item && item.type === "income" && !amount) {
-    next.received = 0;
-    next.receivedCash = 0;
-    next.paid = false;
-  }
-  return next;
-}
-// Somme de tous les soldes bancaires du mois, quelle que soit la clé — y compris d'anciens
-// seaux orphelins (ex. "commun") pas encore réaffectés à une personne.
-function sumBankBalances(data) {
-  return Object.values(bankBalancesOf(data)).reduce((s, v) => s + (typeof v === "number" ? v : 0), 0);
-}
-function bankFor(data, scope) {
-  if (scope === "famille") return sumBankBalances(data);
-  return bankBalancesOf(data)[scope] || 0;
-}
-// Solde espèces (argent liquide en main), saisi à la main comme le solde bancaire :
-// format { habib, marwa }. Il s'ajoute au solde bancaire dans l'argent disponible.
-function cashBalancesOf(data) {
-  return (data && data.cashBalances && typeof data.cashBalances === "object") ? data.cashBalances : {};
-}
-function cashFor(data, scope) {
-  const all = cashBalancesOf(data);
-  if (scope === "famille") return Object.values(all).reduce((s, v) => s + (typeof v === "number" ? v : 0), 0);
-  return all[scope] || 0;
-}
-
 // Somme des postes d'un espace (revenus ou dépenses) pour un mois donné.
 // `kind` vaut "income" ou "expense". Sert à la ventilation et aux graphes consolidés.
 function ownerKindSum(data, scope, kind) {
@@ -249,78 +180,14 @@ function ownerKindSum(data, scope, kind) {
   }, 0);
 }
 
-function computeTotals(cat, data, scope = "famille") {
-  const values = (data && data.values) || {};
-  let totalIncome = 0;
-  let epargneIn = 0;          // "Virement de l'épargne" : reprise sur la réserve, pas un vrai revenu
-  let revenusAVenir = 0;      // revenus du mois pas encore cochés "reçu"
-  let especesRecues = 0;      // revenus déjà encaissés en espèces (hors compte bancaire)
-  const byGroup = { regulieres: 0, occasionnelles: 0, capital: 0 };
-  let chargesAVenir = 0;      // charges réelles (régulières/occasionnelles) pas encore payées
-  let capitalAVenir = 0;      // épargne/investissement du mois pas encore fait(e)
-  cat.items.forEach((item) => {
-    if (!inScope(item, scope)) return;
-    const v = values[item.id];
-    const amount = (v && v.amount) || 0;
-    if (item.type === "income") {
-      totalIncome += amount;
-      if (item.role === "epargne_out") epargneIn += amount;
-      revenusAVenir += Math.max(0, amount - receivedOf(v));
-      // Seulement les revenus prévus ce mois (montant > 0), comme ceux affichés dans le Suivi :
-      // un poste remis à 0 garde son ancien `receivedCash` en base, invisible et non modifiable.
-      if (amount > 0) especesRecues += cashOf(v);
-    } else {
-      byGroup[item.type] = (byGroup[item.type] || 0) + amount;
-      if (isShared(item)) {
-        // Le compte est débité du montant TOTAL (pas juste la part nette `amount`) tant que
-        // ce n'est pas payé ; la part remboursée par l'autre personne est un revenu à venir
-        // tant que le remboursement n'est pas reçu. `amount` (net) continue seul d'alimenter
-        // byGroup/Dépenses/Prévisions ci-dessus : rien ne change de ce côté-là.
-        // Par défaut (tant que le montant total réel n'est pas saisi) : une dépense partagée
-        // se répartit à 50/50, donc le montant total = le double de la part nette (`amount`).
-        const montantTotal = (v && v.montantTotal != null) ? v.montantTotal : amount * 2;
-        const partAutre = Math.max(0, montantTotal - amount);
-        if (!v || !v.paid) chargesAVenir += montantTotal;
-        if (!v || !v.remboursementRecu) revenusAVenir += partAutre;
-      } else if (!v || !v.paid) {
-        if (item.type === "capital") capitalAVenir += amount;
-        else chargesAVenir += amount;
-      }
-    }
-  });
-  const totalExpenses = byGroup.regulieres + byGroup.occasionnelles + byGroup.capital;
-  // Dépenses réelles : hors épargne/investissement, qui ne sont pas de l'argent perdu mais
-  // du patrimoine qu'on range ailleurs (compte épargne, etc.), pas une charge de vie.
-  const depensesReelles = byGroup.regulieres + byGroup.occasionnelles;
-  const revenusReels = totalIncome - epargneIn;   // revenus hors reprise sur l'épargne
-  // Solde / reste à vivre : ici on réintègre la reprise sur l'épargne (totalIncome, pas
-  // revenusReels) — l'argent transféré comble vraiment le mois, donc le solde doit refléter
-  // la trésorerie réelle et ne pas plonger dans le négatif à cause de ça. Le fait que ce
-  // mois s'appuie sur l'épargne reste visible via la note sur la carte "Revenus".
-  const balance = totalIncome - totalExpenses;
-  const bankBalance = bankFor(data, scope);
-  // Reste à vivre réel / solde projeté : l'épargne/investissement pas encore fait(e) quittera
-  // quand même le compte courant, donc on la déduit toujours ici (sinon on risque de la
-  // "dépenser" par erreur) — seul l'affichage "Charges à venir" la distingue des vraies factures.
-  const aVenirTotal = chargesAVenir + capitalAVenir;
-  // Argent disponible = compte + espèces en main (solde espèces saisi à la main, qui tient
-  // compte du liquide déjà dépensé). `especesRecues` reste affiché pour info seulement :
-  // l'ajouter en plus compterait deux fois le liquide déjà inclus dans le solde espèces.
-  const cashBalance = cashFor(data, scope);
-  const disponible = bankBalance + cashBalance;
-  const resteAVivreReel = disponible - aVenirTotal;
-  // Solde projeté fin de mois : + les revenus encore à encaisser. Chiffre stable qui ne
-  // saute pas selon la date à laquelle le salaire (ou les versements de l'Etude) tombent.
-  const soldeProjete = disponible + revenusAVenir - aVenirTotal;
-  return { totalIncome, revenusReels, epargneIn, revenusAVenir, especesRecues, byGroup, totalExpenses, depensesReelles, balance, chargesAVenir, capitalAVenir, resteAVivreReel, soldeProjete, bankBalance, cashBalance };
-}
-
 // ---- State ----
 let currentUser = null;
 let currentMonthId = monthId(new Date());
 let monthData = null;
 let catalog = null;
 let saveTimeout = null;
+// Champs du mois affiché modifiés depuis le dernier enregistrement (voir saveMonth).
+const monthChanges = createChangeSet();
 let currentScope = lsGet("budget-scope") || DEFAULT_SCOPE;
 let currentView = "suivi";
 // Prévisions : vue compacte par défaut (juste le libellé du poste). Le mode édition
@@ -577,10 +444,6 @@ async function fetchMonth(id) {
   return snap.exists() ? snap.data() : null;
 }
 
-async function persistMonth(id, data) {
-  await setDoc(doc(db, "months", id), data);
-}
-
 async function fetchAllMonthsAsc() {
   const snap = await getDocs(query(collection(db, "months"), orderBy("__name__", "asc")));
   const out = [];
@@ -588,21 +451,40 @@ async function fetchAllMonthsAsc() {
   return out;
 }
 
-async function saveMonth() {
-  if (!monthData) return;
+function saveMeta() {
+  return { updatedAt: new Date().toISOString(), updatedBy: currentUser.email };
+}
+
+// Affiche "Enregistrement…" / "Enregistré" / "Erreur d'enregistrement" autour d'une écriture.
+async function withSaveStatus(write) {
   saveStatus.textContent = "Enregistrement…";
   try {
-    await persistMonth(currentMonthId, {
-      ...monthData,
-      updatedAt: new Date().toISOString(),
-      updatedBy: currentUser.email
-    });
+    await write();
     saveStatus.textContent = "Enregistré";
     setTimeout(() => { if (saveStatus.textContent === "Enregistré") saveStatus.textContent = ""; }, 1500);
+    return true;
   } catch (e) {
     saveStatus.textContent = "Erreur d'enregistrement";
     console.error(e);
+    return false;
   }
+}
+
+// Enregistre uniquement les champs modifiés (monthChanges) : le reste du mois, peut-être
+// modifié entre-temps sur un autre appareil, n'est pas réécrit avec notre copie.
+async function saveMonth() {
+  clearTimeout(saveTimeout);
+  saveTimeout = null;
+  if (!monthData) return;
+  const id = currentMonthId;
+  const paths = monthChanges.take();
+  const ok = await withSaveStatus(() => saveMonthChanges(monthStore, id, monthData, paths, saveMeta()));
+  // Échec : ces champs seront renvoyés au prochain enregistrement (comme l'ancien mois entier).
+  if (!ok && id === currentMonthId) monthChanges.add(paths);
+}
+
+function markChanged(paths) {
+  monthChanges.add(paths);
 }
 
 function scheduleSave() {
@@ -611,15 +493,11 @@ function scheduleSave() {
   saveTimeout = setTimeout(saveMonth, 600);
 }
 
-function cloneForNewMonth(prev) {
-  const values = {};
-  Object.entries((prev && prev.values) || {}).forEach(([id, v]) => {
-    values[id] = { amount: v.amount || 0, paid: false };
-  });
-  return { values, bankBalances: {} };
-}
-
 async function loadMonth(id) {
+  // Une saisie encore en attente d'enregistrement concerne le mois affiché jusqu'ici : on
+  // l'enregistre avant de le remplacer.
+  if (saveTimeout) await saveMonth();
+  monthChanges.take();
   currentMonthId = id;
   monthTitle.textContent = monthLabel(id);
   monthData = await fetchMonth(id);
@@ -631,10 +509,18 @@ async function loadMonth(id) {
 createMonthBtn.addEventListener("click", async () => {
   const prevId = addMonths(currentMonthId, -1);
   const prev = await fetchMonth(prevId);
+  const id = currentMonthId;
   monthData = prev ? cloneForNewMonth(prev) : { values: {}, bankBalances: {} };
   emptyMonthBanner.classList.add("hidden");
   render();
-  await saveMonth();
+  let res = null;
+  await withSaveStatus(async () => { res = await createMonth(monthStore, id, monthData, saveMeta()); });
+  // Mois créé entre-temps sur un autre appareil : on affiche celui-là, sans l'écraser.
+  if (res && !res.created && id === currentMonthId) {
+    monthData = res.data;
+    if (!monthData.values) monthData.values = {};
+    render();
+  }
 });
 
 // ---- Rendu : Suivi du mois ----
@@ -715,7 +601,7 @@ function buildIncomeRow(item) {
 
   // Applique la valeur, resynchronise l'affichage (barre, "sur X", case, total), sauvegarde.
   const commit = (next) => {
-    monthData.values[item.id] = next;
+    markChanged(setItemValue(monthData, item.id, next));
     const amt = next.amount || 0;
     const rec = receivedOf(next);
     const full = amt > 0 && rec >= amt;
@@ -795,13 +681,13 @@ function buildSuiviRow(item) {
   // une dépense partagée) via {...c, ...} au lieu de reconstruire l'objet from scratch.
   amountInput.addEventListener("input", () => {
     const c = current();
-    monthData.values[item.id] = { ...c, amount: parseFloat(amountInput.value) || 0 };
+    markChanged(setItemValue(monthData, item.id, { ...c, amount: parseFloat(amountInput.value) || 0 }));
     renderTotals();
     scheduleSave();
   });
   paidCheck.addEventListener("change", () => {
     const c = current();
-    monthData.values[item.id] = { ...c, paid: paidCheck.checked };
+    markChanged(setItemValue(monthData, item.id, { ...c, paid: paidCheck.checked }));
     renderTotals();
     scheduleSave();
   });
@@ -827,13 +713,13 @@ function buildSuiviRow(item) {
   const rembCheck = sub.querySelector(".shared-remb-check");
   totalInput.addEventListener("input", () => {
     const c = current();
-    monthData.values[item.id] = { ...c, montantTotal: parseFloat(totalInput.value) || 0 };
+    markChanged(setItemValue(monthData, item.id, { ...c, montantTotal: parseFloat(totalInput.value) || 0 }));
     renderTotals();
     scheduleSave();
   });
   rembCheck.addEventListener("change", () => {
     const c = current();
-    monthData.values[item.id] = { ...c, remboursementRecu: rembCheck.checked };
+    markChanged(setItemValue(monthData, item.id, { ...c, remboursementRecu: rembCheck.checked }));
     renderTotals();
     scheduleSave();
   });
@@ -870,16 +756,15 @@ function buildFamilleRow(item) {
 
 bankBalanceEl.addEventListener("input", () => {
   if (!monthData) return;
-  monthData.bankBalances = bankBalancesOf(monthData);
-  monthData.bankBalances[currentScope] = parseFloat(bankBalanceEl.value) || 0;
-  delete monthData.bankBalance; // conversion de l'ancien format au premier enregistrement
+  // (convertit l'ancien format bankBalance au premier enregistrement)
+  markChanged(setBankBalance(monthData, currentScope, parseFloat(bankBalanceEl.value) || 0));
   renderTotals();
   scheduleSave();
 });
 
 cashBalanceEl.addEventListener("input", () => {
   if (!monthData) return;
-  monthData.cashBalances = { ...cashBalancesOf(monthData), [currentScope]: parseFloat(cashBalanceEl.value) || 0 };
+  markChanged(setCashBalance(monthData, currentScope, parseFloat(cashBalanceEl.value) || 0));
   renderTotals();
   scheduleSave();
 });
@@ -999,12 +884,10 @@ function famRealtimePanel(days) {
 
   // Lignes "Solde bancaire" et "Solde espèces" : éditables, une valeur par espace
   body.appendChild(famRtInputRow("Solde bancaire", (k) => totals[k].bankBalance, famBank, (k, v) => {
-    monthData.bankBalances = bankBalancesOf(monthData);
-    monthData.bankBalances[k] = v;
-    delete monthData.bankBalance;
+    markChanged(setBankBalance(monthData, k, v));
   }));
   body.appendChild(famRtInputRow("Solde espèces", (k) => totals[k].cashBalance, cashFor(monthData, "famille"), (k, v) => {
-    monthData.cashBalances = { ...cashBalancesOf(monthData), [k]: v };
+    markChanged(setCashBalance(monthData, k, v));
   }));
 
   const famEspeces = OWNER_KEYS.reduce((s, k) => s + totals[k].especesRecues, 0);
@@ -1261,22 +1144,20 @@ async function renderForecast() {
 }
 
 async function setForecastValue(targetMonthId, itemId, value, monthsByI) {
-  let data = monthsByI[targetMonthId];
+  const data = monthsByI[targetMonthId];
   const wasNew = !data || !data.values || !Object.keys(data).length;
+  let sourceData = null;
   if (wasNew) {
     const ids = forecastMonthIds();
     const idx = ids.indexOf(targetMonthId);
-    let sourceData = null;
     for (let i = idx - 1; i >= 0 && !sourceData; i--) sourceData = monthsByI[ids[i]] && monthsByI[ids[i]].values ? monthsByI[ids[i]] : null;
     if (!sourceData) sourceData = (await fetchMonth(currentMonthId)) || { values: {} };
-    data = cloneForNewMonth(sourceData);
-    monthsByI[targetMonthId] = data;
   }
-  const prev = data.values[itemId] || { amount: 0, paid: false };
-  // {...prev} : garde l'encaissé (virement/espèces) et les champs de dépense partagée.
+  // withIncomeAmount garde l'encaissé (virement/espèces) et les champs de dépense partagée ;
+  // seuls les champs modifiés du poste sont écrits (mois créé à partir de sourceData s'il
+  // n'existe pas encore).
   const item = catalog.items.find((it) => it.id === itemId);
-  data.values[itemId] = withIncomeAmount(item, prev, value);
-  await persistMonth(targetMonthId, { ...data, updatedAt: new Date().toISOString(), updatedBy: currentUser.email });
+  monthsByI[targetMonthId] = await saveForecastValue(monthStore, targetMonthId, wasNew ? null : data, sourceData, item, itemId, value, saveMeta());
   // Mois vierge qu'on vient de matérialiser (valeurs héritées du mois précédent) : on
   // ré-affiche une fois pour montrer ces valeurs. Sinon, on met juste à jour les totaux
   // de la colonne éditée — pas de reconstruction, le focus reste dans la grille.
@@ -1345,11 +1226,7 @@ async function removeItem(itemId, ids, monthsByI) {
     if (!ok) return;
   }
 
-  for (const id of affectedFuture) {
-    const data = monthsByI[id];
-    data.values[itemId] = { ...data.values[itemId], amount: 0 };
-    await persistMonth(id, { ...data, updatedAt: new Date().toISOString(), updatedBy: currentUser.email });
-  }
+  await zeroItemInMonths(monthStore, affectedFuture, monthsByI, itemId, saveMeta());
 
   if (hasHistory) {
     item.retiredAt = currentId;
