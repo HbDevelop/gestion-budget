@@ -13,7 +13,7 @@ import {
   withIncomeAmount, sumBankBalances, bankFor, cashFor, computeTotals, cloneForNewMonth,
   setItemValue, setBankBalance, setCashBalance, createChangeSet, saveMonthChanges, createMonth,
   saveForecastValue, zeroItemInMonths
-} from "./budget-core.js?v=1";
+} from "./budget-core.js?v=2";
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -220,6 +220,7 @@ const daysLeftEl = $("#days-left");
 const bankBalanceEl = $("#bank-balance");
 const cashBalanceEl = $("#cash-balance");
 const especesRecuesEl = $("#especes-recues");
+const virementsRecusEl = $("#virements-recus");
 const revenusAVenirEl = $("#revenus-a-venir");
 const chargesAVenirEl = $("#charges-a-venir");
 const capitalAVenirEl = $("#capital-a-venir");
@@ -774,7 +775,7 @@ function renderTotals() {
   daysLeftEl.textContent = days;
 
   if (!monthData || !catalog) {
-    [totalIncomeEl, totalExpensesEl, totalCapitalEl, balanceEl, especesRecuesEl, revenusAVenirEl, chargesAVenirEl, capitalAVenirEl, resteAVivreEl, soldeProjeteEl, dailyAllocationEl, dailyAllocationReelleEl]
+    [totalIncomeEl, totalExpensesEl, totalCapitalEl, balanceEl, especesRecuesEl, virementsRecusEl, revenusAVenirEl, chargesAVenirEl, capitalAVenirEl, resteAVivreEl, soldeProjeteEl, dailyAllocationEl, dailyAllocationReelleEl]
       .forEach((elm) => { if (elm) elm.textContent = euros(0); });
     return;
   }
@@ -789,6 +790,7 @@ function renderTotals() {
   balanceEl.textContent = euros(t.balance);
   balanceEl.classList.toggle("negative", t.balance < 0);
   if (especesRecuesEl) especesRecuesEl.textContent = euros(t.especesRecues);
+  if (virementsRecusEl) virementsRecusEl.textContent = euros(t.virementsRecus);
   revenusAVenirEl.textContent = euros(t.revenusAVenir);
   chargesAVenirEl.textContent = euros(t.chargesAVenir);
   if (capitalAVenirEl) capitalAVenirEl.textContent = euros(t.capitalAVenir);
@@ -859,7 +861,8 @@ function famSummaryCard(label, value, kind, note) {
 
 function famRealtimePanel(days) {
   const card = el("section", "card live-panel");
-  card.appendChild(el("div", "card-header", "<h2>Suivi en temps réel par espace</h2>"));
+  card.appendChild(el("div", "card-header",
+    `<h2>Suivi en temps réel par espace</h2><span class="live-days"><b>${days}</b> jours restants</span>`));
 
   const totals = {};
   OWNER_KEYS.forEach((k) => { totals[k] = computeTotals(catalog, monthData, k); });
@@ -882,7 +885,9 @@ function famRealtimePanel(days) {
 
   const body = el("tbody");
 
-  // Lignes "Solde bancaire" et "Solde espèces" : éditables, une valeur par espace
+  // Mêmes thèmes que le suivi d'un espace (index.html). Lignes "Solde bancaire" et
+  // "Solde espèces" : éditables, une valeur par espace.
+  body.appendChild(famRtGroupRow("💳 Mon argent aujourd'hui"));
   body.appendChild(famRtInputRow("Solde bancaire", (k) => totals[k].bankBalance, famBank, (k, v) => {
     markChanged(setBankBalance(monthData, k, v));
   }));
@@ -891,10 +896,15 @@ function famRealtimePanel(days) {
   }));
 
   const famEspeces = OWNER_KEYS.reduce((s, k) => s + totals[k].especesRecues, 0);
+  const famVirements = OWNER_KEYS.reduce((s, k) => s + totals[k].virementsRecus, 0);
+  body.appendChild(famRtGroupRow("📥 Revenus du mois"));
+  body.appendChild(famRtRow("Virements reçus", OWNER_KEYS.map((k) => totals[k].virementsRecus), famVirements));
   body.appendChild(famRtRow("Espèces reçues", OWNER_KEYS.map((k) => totals[k].especesRecues), famEspeces));
   body.appendChild(famRtRow("Revenus à venir", OWNER_KEYS.map((k) => totals[k].revenusAVenir), famRevenus));
+  body.appendChild(famRtGroupRow("📤 Sorties à venir"));
   body.appendChild(famRtRow("Charges à venir", OWNER_KEYS.map((k) => totals[k].chargesAVenir), famUpcoming));
   body.appendChild(famRtRow("Épargne/Invest. prévu(e)", OWNER_KEYS.map((k) => totals[k].capitalAVenir), famCapitalAVenir));
+  body.appendChild(famRtGroupRow("🎯 Fin de mois"));
   body.appendChild(famRtRow("Reste à vivre réel", OWNER_KEYS.map((k) => totals[k].resteAVivreReel), famReste, true));
   body.appendChild(famRtRow("Solde projeté", OWNER_KEYS.map((k) => totals[k].soldeProjete), famProjete, true));
   body.appendChild(famRtRow("Allocation réelle / jour", OWNER_KEYS.map((k) => totals[k].resteAVivreReel / days), famReste / days, true));
@@ -903,6 +913,15 @@ function famRealtimePanel(days) {
   table.appendChild(body);
   card.appendChild(table);
   return card;
+}
+
+// Ligne-titre d'un thème dans le tableau Famille (sur toute la largeur).
+function famRtGroupRow(title) {
+  const tr = el("tr", "fam-rt-group");
+  const td = el("td", null, title);
+  td.colSpan = OWNER_KEYS.length + 2;
+  tr.appendChild(td);
+  return tr;
 }
 
 function famRtInputRow(label, valueOf, famValue, apply) {
