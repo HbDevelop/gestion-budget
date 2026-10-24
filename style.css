@@ -276,91 +276,348 @@ body {
 .income-recu.done { color: var(--success); }
 .income-recu.done .recu-bar i { background: var(--success); }
 
-/* ---- Postes à séances (Etude…) : récap du mois + journal des séances ---- */
-.poste-tag-seances { background: #f5f0ff; border-color: #ddd0fb; color: #6d28d9; }
-.btn.small.danger { color: var(--danger); border-color: #fecaca; }
-.btn.small.danger:hover { background: #fef2f2; }
-.seances-block .income-row { display: flex; justify-content: space-between; gap: 8px; }
-.seances-recap {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 4px 16px;
-  margin-left: 2px;
-  font-size: 12.5px;
-  color: var(--text-muted);
+/* ---- Postes à séances (Etude…) : carte récap + journal des séances ---- */
+.sx {
+  --sx-accent: #7c3aed;
+  --sx-accent-soft: #f5f0ff;
+  --sx-ok: #059669;
+  --sx-ok-soft: #ecfdf5;
+  --sx-warn: #b45309;
+  --sx-warn-soft: #fffbeb;
+  --sx-info: #2563eb;
+  --sx-info-soft: #eff6ff;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 14px;
+  background: linear-gradient(180deg, #faf7ff 0%, #ffffff 70%);
+  border: 1px solid #ece4fd;
 }
-.seances-recap b { color: var(--text); font-weight: 600; }
-.seances-recap small { font-size: 11.5px; }
-.seances-arr { color: #b45309; font-weight: 600; }
-.seances-panel {
-  margin-top: 6px;
-  padding: 12px;
-  border: 1px solid var(--border);
-  border-radius: 10px;
-  background: var(--bg);
+.calc-cell { color: #6d28d9; font-style: italic; }
+
+/* En-tête : icône, titre, bouton d'ouverture du journal */
+.sx-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.sx-title { display: flex; align-items: center; gap: 10px; min-width: 0; }
+.sx-title b { display: block; font-size: 15px; }
+.sx-title small { display: block; font-size: 12px; color: var(--text-muted); }
+.sx-icon {
+  flex: none;
+  width: 38px;
+  height: 38px;
+  display: grid;
+  place-items: center;
+  border-radius: 12px;
+  background: var(--sx-accent-soft);
+  font-size: 19px;
+}
+.sx-toggle {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: none;
+  border-radius: 999px;
+  padding: 7px 14px;
+  background: var(--sx-accent);
+  color: #fff;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  box-shadow: 0 2px 8px rgba(124, 58, 237, 0.25);
+  transition: transform 0.15s ease, box-shadow 0.15s ease;
+}
+.sx-toggle:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(124, 58, 237, 0.3); }
+.sx-chev { display: inline-block; transition: transform 0.2s ease; font-size: 11px; }
+.sx-open .sx-toggle { background: #fff; color: var(--sx-accent); box-shadow: inset 0 0 0 1px #ddd0fb; }
+.sx-open .sx-toggle .sx-chev { transform: rotate(180deg); }
+
+/* Indicateurs du mois + barre virement / espèces */
+.sx-kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.sx-kpi {
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 2px;
+  padding: 10px 12px;
+  border-radius: 12px;
+  background: #fff;
+  border: 1px solid var(--border);
+  min-width: 0;
 }
-.seances-title {
+.sx-kpi span { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); }
+.sx-kpi b { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.sx-kpi small { font-size: 11.5px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sx-kpi.sx-ok b { color: var(--sx-ok); }
+.sx-kpi.sx-due { background: var(--sx-warn-soft); border-color: #fde68a; }
+.sx-kpi.sx-due b { color: var(--sx-warn); }
+.sx-bar { display: flex; height: 6px; border-radius: 999px; background: #ede9fe; overflow: hidden; }
+.sx-bar i { display: block; height: 100%; transition: width 0.3s ease; }
+.sx-bar-vir { background: linear-gradient(90deg, #10b981, #059669); }
+.sx-bar-cash { background: linear-gradient(90deg, #fbbf24, #f59e0b); }
+.sx-alert {
+  padding: 8px 12px;
+  border-radius: 10px;
+  background: var(--sx-warn-soft);
+  border: 1px solid #fde68a;
+  color: var(--sx-warn);
+  font-size: 12.5px;
+}
+
+/* Journal */
+.sx-panel { display: flex; flex-direction: column; gap: 10px; padding-top: 4px; }
+.sx-section { display: flex; align-items: baseline; justify-content: space-between; gap: 8px; margin-top: 4px; }
+.sx-section h4 { margin: 0; font-size: 13px; font-weight: 700; }
+.sx-section span { font-size: 12px; color: var(--text-muted); }
+.sx-list { display: flex; flex-direction: column; gap: 8px; }
+.sx-empty {
   margin: 0;
-  font-size: 11.5px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
+  padding: 16px;
+  border: 1px dashed #ddd0fb;
+  border-radius: 12px;
+  text-align: center;
+  font-size: 13px;
   color: var(--text-muted);
 }
-.seances-list { display: flex; flex-direction: column; gap: 6px; }
-.seances-empty { margin: 0; font-size: 13px; color: var(--text-muted); }
-.seance-row {
+
+/* Carte d'une séance : bande de couleur selon le statut, bloc date, contenu, menu ⋯ */
+.sx-card {
+  --st: var(--sx-info);
+  position: relative;
   display: grid;
-  grid-template-columns: minmax(110px, auto) minmax(70px, 1fr) auto;
-  gap: 4px 12px;
+  grid-template-columns: 54px 1fr auto;
+  gap: 12px;
+  padding: 10px 10px 10px 0;
+  border-radius: 12px;
+  background: #fff;
+  border: 1px solid var(--border);
+  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
+  overflow: visible;
+  transition: box-shadow 0.15s ease, border-color 0.15s ease;
+}
+.sx-card::before {
+  content: "";
+  position: absolute;
+  left: -1px;
+  top: -1px;
+  bottom: -1px;
+  width: 4px;
+  border-radius: 12px 0 0 12px;
+  background: var(--st);
+}
+.sx-card:hover { box-shadow: 0 4px 14px rgba(16, 24, 40, 0.08); border-color: #d9dde3; }
+.sx-faite { --st: var(--sx-ok); }
+.sx-confirmer { --st: #f59e0b; }
+.sx-annulee { --st: #cbd5e1; background: #fafafa; }
+.sx-annulee .sx-name, .sx-annulee .sx-date b { color: var(--text-muted); }
+.sx-annulee .sx-price { text-decoration: line-through; color: var(--text-muted); }
+
+.sx-date {
+  display: flex;
+  flex-direction: column;
   align-items: center;
-  padding: 8px 10px;
-  border-radius: 8px;
-  background: var(--card-bg);
-  border: 1px solid var(--border);
-  font-size: 13px;
+  justify-content: center;
+  line-height: 1.1;
+  padding-left: 6px;
 }
-.seance-row.annulee { opacity: 0.6; }
-.seance-row.annulee .seance-prix { text-decoration: line-through; }
-.seance-date { font-weight: 600; white-space: nowrap; }
-.seance-date small { font-weight: 400; color: var(--text-muted); }
-.seance-prix { font-weight: 600; text-align: right; }
-.seance-st { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 4px 10px; }
-.st { font-size: 12px; white-space: nowrap; }
-.st-faite, .st-payee { color: var(--success); }
-.st-prevue { color: var(--primary-dark); }
-.st-confirmer, .st-due { color: #b45309; }
-.st-annulee { color: var(--text-muted); }
-.seance-actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-.seance-actions .btn.small, .seance-form .btn.small, .eleve-row .btn.small { padding: 4px 10px; font-size: 12.5px; }
-.seance-paydate, .seance-form input, .seance-form select, .eleve-row input[type="text"], .eleve-row input[type="number"] {
+.sx-date b { font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.sx-date span { font-size: 11px; font-weight: 600; text-transform: uppercase; color: var(--text-muted); }
+.sx-date small { margin-top: 2px; font-size: 11px; color: var(--sx-accent); font-weight: 600; }
+
+.sx-body { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
+.sx-line { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.sx-name { flex: 1; min-width: 0; font-weight: 600; font-size: 14px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sx-price { font-weight: 700; font-size: 15px; font-variant-numeric: tabular-nums; }
+.sx-av {
+  flex: none;
+  width: 26px;
+  height: 26px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: hsl(var(--h, 260) 70% 92%);
+  color: hsl(var(--h, 260) 55% 35%);
+  font-size: 12px;
+  font-weight: 700;
+}
+.sx-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 2px 9px;
+  border-radius: 999px;
+  font-size: 11.5px;
+  font-weight: 600;
+  white-space: nowrap;
+}
+.chip-faite, .chip-payee { background: var(--sx-ok-soft); color: var(--sx-ok); }
+.chip-prevue { background: var(--sx-info-soft); color: var(--sx-info); }
+.chip-confirmer, .chip-due { background: var(--sx-warn-soft); color: var(--sx-warn); }
+.chip-annulee { background: #f1f5f9; color: #64748b; }
+
+/* Actions : boutons « pilule », paiement en un clic */
+.sx-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.sx-pay {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px;
+  padding: 3px;
+  border-radius: 999px;
+  background: var(--bg);
+}
+.sx-btn {
   border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 4px 8px;
-  font-size: 13px;
-  background: var(--card-bg);
+  background: #fff;
   color: var(--text);
+  border-radius: 999px;
+  padding: 5px 12px;
+  font-size: 12.5px;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
 }
-.seance-form { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
-.seance-form input[name="prix"] { width: 80px; }
-.seance-form-title { width: 100%; font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); }
-.seance-edit { grid-column: 1 / -1; padding-top: 6px; border-top: 1px dashed var(--border); }
-.eleves-box summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--text-muted); }
-.eleves-box[open] summary { margin-bottom: 6px; }
-.eleve-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 6px; font-size: 13px; }
-.eleve-row .eleve-nom, .eleve-row input[name="nom"] { flex: 1 1 120px; min-width: 0; }
-.eleve-row .eleve-tarif, .eleve-row input[name="tarif"] { width: 72px; }
-.eleve-row.inactif .eleve-nom { color: var(--text-muted); text-decoration: line-through; }
-.eleve-actif { display: inline-flex; gap: 4px; align-items: center; color: var(--text-muted); }
-.calc-cell { color: #6d28d9; font-style: italic; }
-.tarif-prompt {
-  margin-top: 6px;
-  padding: 8px 10px;
-  border: 1px solid #fde68a;
+.sx-btn:hover { border-color: #c4b5fd; color: var(--sx-accent); }
+.sx-btn-pay { border-color: transparent; }
+.sx-btn-pay:hover { background: var(--sx-ok-soft); color: var(--sx-ok); border-color: transparent; }
+.sx-btn-primary { background: var(--sx-accent); border-color: var(--sx-accent); color: #fff; }
+.sx-btn-primary:hover { background: #6d28d9; color: #fff; border-color: #6d28d9; }
+.sx-paydate, .sx-form input, .sx-form select, .sx-eleve input[type="text"], .sx-euro input {
+  border: 1px solid var(--border);
   border-radius: 8px;
+  padding: 5px 8px;
+  font-size: 13px;
+  background: #fff;
+  color: var(--text);
+  font-family: inherit;
+}
+.sx-paydate { border-radius: 999px; border-color: transparent; background: transparent; font-size: 12px; color: var(--text-muted); }
+.sx-form input:focus, .sx-form select:focus, .sx-eleve input:focus, .sx-paydate:focus {
+  outline: none;
+  border-color: #a78bfa;
+  box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.25);
+}
+
+/* Menu « ⋯ » */
+.sx-more { position: relative; align-self: start; }
+.sx-more summary {
+  list-style: none;
+  width: 28px;
+  height: 28px;
+  display: grid;
+  place-items: center;
+  border-radius: 8px;
+  color: var(--text-muted);
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  user-select: none;
+}
+.sx-more summary::-webkit-details-marker { display: none; }
+.sx-more summary:hover, .sx-more[open] summary { background: var(--bg); color: var(--text); }
+.sx-menu {
+  position: absolute;
+  right: 0;
+  top: 32px;
+  z-index: 20;
+  min-width: 190px;
+  display: flex;
+  flex-direction: column;
+  padding: 6px;
+  border-radius: 12px;
+  background: #fff;
+  border: 1px solid var(--border);
+  box-shadow: 0 12px 32px rgba(16, 24, 40, 0.16);
+}
+.sx-menu-item {
+  border: none;
+  background: none;
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: 13px;
+  color: var(--text);
+  cursor: pointer;
+}
+.sx-menu-item:hover { background: var(--bg); }
+.sx-danger { color: var(--danger); }
+.sx-danger:hover { background: #fef2f2; }
+
+/* Formulaires (nouvelle séance / modification) */
+.sx-form { display: flex; flex-direction: column; gap: 8px; }
+.sx-new { padding: 12px; border-radius: 12px; background: #fff; border: 1px dashed #c4b5fd; }
+.sx-form-title { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 700; color: var(--sx-accent); }
+.sx-plus {
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  background: var(--sx-accent-soft);
+  font-size: 13px;
+}
+.sx-form-grid { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; }
+.sx-field { display: flex; flex-direction: column; gap: 3px; flex: 1 1 140px; min-width: 0; }
+.sx-field > span { font-size: 11px; font-weight: 600; color: var(--text-muted); }
+.sx-field input, .sx-field select { width: 100%; padding: 7px 9px; }
+.sx-form-grid > .sx-btn { padding: 8px 18px; }
+.sx-euro { position: relative; display: inline-flex; align-items: center; }
+.sx-euro i { position: absolute; right: 9px; font-style: normal; font-size: 12px; color: var(--text-muted); pointer-events: none; }
+.sx-field .sx-euro { display: flex; width: 100%; }
+.sx-field .sx-euro input { padding-right: 24px; }
+.seance-edit { grid-column: 1 / -1; padding: 10px 10px 0 12px; margin-top: 2px; border-top: 1px dashed var(--border); }
+
+/* Élèves */
+.sx-eleves { border-radius: 12px; background: #fff; border: 1px solid var(--border); }
+.sx-eleves summary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+}
+.sx-eleves summary::-webkit-details-marker { display: none; }
+.sx-eleves summary small { flex: 1; font-weight: 500; color: var(--text-muted); }
+.sx-eleves[open] summary .sx-chev { transform: rotate(180deg); }
+.sx-eleves[open] summary { border-bottom: 1px solid var(--border); }
+.sx-eleve { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid #f1f2f4; }
+.sx-eleve:last-child { border-bottom: none; }
+.sx-eleve .eleve-nom, .sx-eleve input[name="nom"] { flex: 1 1 100px; min-width: 0; border-color: transparent; font-weight: 600; }
+.sx-eleve .eleve-nom:hover { border-color: var(--border); }
+.sx-tarif input { width: 118px; padding-right: 66px; text-align: right; }
+.sx-eleve.inactif .eleve-nom { color: var(--text-muted); text-decoration: line-through; }
+.sx-eleve.inactif .sx-av { filter: grayscale(1); opacity: 0.6; }
+.sx-av-add { background: var(--sx-accent-soft); color: var(--sx-accent); }
+.sx-eleve-add input[name="nom"] { border-color: var(--border); font-weight: 400; }
+
+/* Interrupteur actif / inactif */
+.sx-switch { position: relative; flex: none; width: 34px; height: 20px; cursor: pointer; }
+.sx-switch input { position: absolute; opacity: 0; width: 0; height: 0; }
+.sx-switch span { position: absolute; inset: 0; border-radius: 999px; background: #cbd5e1; transition: background 0.2s ease; }
+.sx-switch span::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  background: #fff;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  transition: transform 0.2s ease;
+}
+.sx-switch input:checked + span { background: var(--sx-ok); }
+.sx-switch input:checked + span::after { transform: translateX(14px); }
+.sx-switch input:focus-visible + span { box-shadow: 0 0 0 3px rgba(5, 150, 105, 0.25); }
+
+/* Changement de tarif : proposition de mise à jour des séances */
+.tarif-prompt {
+  margin: 0 12px 10px;
+  padding: 10px 12px;
+  border: 1px solid #fde68a;
+  border-radius: 10px;
   background: #fffbeb;
   font-size: 13px;
   display: flex;
@@ -369,9 +626,20 @@ body {
 }
 .tarif-prompt small { color: var(--text-muted); }
 .tarif-actions { display: flex; flex-wrap: wrap; gap: 6px; }
-.tarif-actions .btn.small { padding: 4px 10px; font-size: 12.5px; }
-/* .btn.primary prend toute la largeur par défaut : pas dans les petits formulaires des séances. */
-.tarif-actions .btn.primary, .seance-form .btn.primary { width: auto; }
+
+@media (max-width: 520px) {
+  .sx-kpis { gap: 6px; }
+  .sx-kpi { padding: 8px 9px; }
+  .sx-kpi b { font-size: 15px; }
+  .sx-kpi small { white-space: normal; }
+  /* Paiement : date sur une ligne, les deux modes côte à côte en dessous. */
+  .sx-pay { display: grid; grid-template-columns: 1fr 1fr; width: 100%; border-radius: 12px; }
+  .sx-paydate { grid-column: 1 / -1; }
+  .sx-btn-pay { text-align: center; }
+  .sx-card { grid-template-columns: 44px 1fr auto; gap: 8px; }
+  .sx-date b { font-size: 19px; }
+  .sx-tarif input { width: 104px; }
+}
 /* Vue Famille : montant déjà encaissé devant le total pour un revenu partiel */
 .fam-recu { color: var(--text-muted); font-weight: 400; }
 @media (max-width: 640px) {
@@ -402,11 +670,13 @@ body {
 @media (min-width: 640px) {
   .live-grid { grid-template-columns: repeat(3, 1fr); }
 }
-.live-field { display: flex; flex-direction: column; gap: 6px; }
+.live-field { display: flex; flex-direction: column; gap: 6px; min-width: 0; }
 .live-label { font-size: 12px; color: var(--text-muted); }
 .live-value { font-size: 17px; font-weight: 600; }
 .live-value.negative { color: var(--danger); }
 .live-input {
+  width: 100%;
+  min-width: 0;
   border: 1px solid var(--border);
   border-radius: 6px;
   padding: 8px 10px;
