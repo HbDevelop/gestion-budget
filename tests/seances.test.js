@@ -5,7 +5,8 @@ import assert from "node:assert/strict";
 import {
   isSeancesItem, monthOfDate, seancesOfItem, seancesValue, recomputeItem, monthsNeeded,
   ajouterSeance, modifierSeance, payerSeance, annulerPaiement, supprimerSeance, arrieres, elevesOf,
-  seancesATarifer, appliquerTarif
+  seancesATarifer, appliquerTarif, datesRecurrentes, programmerSeances, seancesSerie, supprimerSeances,
+  MAX_PROGRAMMATION
 } from "../seances.js";
 import { computeTotals, saveMonthChanges, monthPath } from "../budget-core.js";
 import { createFakeFirestore } from "./helpers/fake-firestore.js";
@@ -334,5 +335,104 @@ describe("changement de tarif d'un élève", () => {
     assert.deepEqual(Object.keys(ch).sort(), ["2026-09", "2026-10", "2026-11"]);
     assert.throws(() => appliquerTarif(docs, cibles, -5), /Prix/);
     assert.deepEqual(appliquerTarif(docs, [], 40), {});
+  });
+});
+
+describe("programmation automatique", () => {
+  test("chaque mardi à 18h, bornes incluses, sur plusieurs mois", () => {
+    // 2026-10-27 et 2026-11-03 sont des mardis.
+    assert.deepEqual(datesRecurrentes({ jours: [2], heure: "18:00", du: "2026-10-27", au: "2026-11-17" }),
+      ["2026-10-27T18:00", "2026-11-03T18:00", "2026-11-10T18:00", "2026-11-17T18:00"]);
+    assert.deepEqual(datesRecurrentes({ jours: [2], heure: "18:00", du: "2026-10-28", au: "2026-11-02" }), []);
+  });
+
+  test("plusieurs jours par semaine, changement d'heure et d'année sans décalage", () => {
+    // Fin de l'heure d'été le 25/10/2026 : les dates restent justes (calcul en UTC).
+    assert.deepEqual(datesRecurrentes({ jours: [6, 1], heure: "10:30", du: "2026-10-24", au: "2026-10-27" }),
+      ["2026-10-24T10:30", "2026-10-26T10:30"]);
+    assert.deepEqual(datesRecurrentes({ jours: [0], heure: "09:00", du: "2026-12-26", au: "2027-01-05" }),
+      ["2026-12-27T09:00", "2027-01-03T09:00"]);
+  });
+
+  test("validations", () => {
+    assert.throws(() => datesRecurrentes({ jours: [], heure: "18:00", du: "2026-10-01", au: "2026-10-31" }), /jour/);
+    assert.throws(() => datesRecurrentes({ jours: [7], heure: "18:00", du: "2026-10-01", au: "2026-10-31" }), /jour/);
+    assert.throws(() => datesRecurrentes({ jours: [2], heure: "18h", du: "2026-10-01", au: "2026-10-31" }), /Heure/);
+    assert.throws(() => datesRecurrentes({ jours: [2], heure: "18:00", du: "2026-10-31", au: "2026-10-01" }), /fin/);
+    assert.throws(() => datesRecurrentes({ jours: [0, 1, 2, 3, 4, 5, 6], heure: "18:00", du: "2026-01-01", au: "2026-12-31" }),
+      new RegExp(String(MAX_PROGRAMMATION)));
+  });
+
+  test("création dans chaque mois, prévu recalculé, doublons ignorés", () => {
+    const docs = { "2026-10": empty(), "2026-11": { values: { [ETU]: { amount: 500, paid: false } } } };
+    ajouterSeance(docs, "deja", seance("2026-11-03T18:00", 30));
+    const dates = datesRecurrentes({ jours: [2], heure: "18:00", du: "2026-10-27", au: "2026-11-17" });
+    assert.deepEqual(monthsNeeded("programmer", { dates }).sort(), ["2026-10", "2026-11"]);
+    let n = 0;
+    const r = programmerSeances(docs, { itemId: ETU, eleveId: "lina", prix: 30, serieId: "serie1" }, dates, () => `p${++n}`);
+    assert.deepEqual(r.creees, ["2026-10-27T18:00", "2026-11-10T18:00", "2026-11-17T18:00"]);
+    assert.deepEqual(r.ignorees, ["2026-11-03T18:00"]);
+    assert.deepEqual(docs["2026-10"].seances.p1, { itemId: ETU, eleveId: "lina", prix: 30, serieId: "serie1", date: "2026-10-27T18:00", statut: "prevue", paiement: null });
+    assert.equal(docs["2026-10"].values[ETU].amount, 30);
+    // Novembre : l'estimation manuelle (500 €) est remplacée par les séances (3 × 30 €).
+    assert.equal(docs["2026-11"].values[ETU].amount, 90);
+    assert.deepEqual(Object.keys(r.changes).sort(), ["2026-10", "2026-11"]);
+  });
+
+  test("supprimer les suivantes d'une série : seulement prévues et non payées, à partir de la date", () => {
+    const docs = { "2026-10": empty(), "2026-11": empty() };
+    let n = 0;
+    const dates = datesRecurrentes({ jours: [2], heure: "18:00", du: "2026-10-20", au: "2026-11-17" });
+    programmerSeances(docs, { itemId: ETU, eleveId: "lina", prix: 30, serieId: "s1" }, dates, () => `p${++n}`);
+    // p1 = 20/10 (faite), p2 = 27/10 (payée), p3 = 03/11, p4 = 10/11 (annulée), p5 = 17/11
+    modifierSeance(docs, "2026-10", "p1", { statut: "faite" });
+    payerSeance(docs, "2026-10", "p2", "especes", "2026-10-27");
+    modifierSeance(docs, "2026-11", "p4", { statut: "annulee" });
+    ajouterSeance(docs, "autre", seance("2026-11-24T18:00", 30));
+    const list = (d) => Object.entries(d).map(([id, data]) => ({ id, data }));
+    const cibles = seancesSerie(list(docs), "s1", "2026-10-20T18:00");
+    assert.deepEqual(cibles.map((s) => s.id), ["p3", "p5"]);
+    assert.deepEqual(seancesSerie(list(docs), "s1", "2026-11-04T00:00").map((s) => s.id), ["p5"]);
+    assert.deepEqual(seancesSerie(list(docs), undefined, "2026-01-01T00:00"), []);
+    assert.deepEqual(monthsNeeded("supprimerListe", { seances: cibles }), ["2026-11"]);
+    supprimerSeances(docs, cibles);
+    assert.deepEqual(Object.keys(docs["2026-11"].seances).sort(), ["autre", "p4"]);
+    assert.equal(docs["2026-11"].values[ETU].amount, 30);
+    assert.ok(docs["2026-10"].seances.p1 && docs["2026-10"].seances.p2);
+  });
+});
+
+describe("estimation manuelle d'un mois", () => {
+  test("mémorisée à la première séance, rétablie quand toutes ses séances sont retirées", () => {
+    const docs = { "2026-11": { values: { [ETU]: { amount: 500, paid: false } } } };
+    ajouterSeance(docs, "a", seance("2026-11-03T18:00", 30));
+    ajouterSeance(docs, "b", seance("2026-11-10T18:00", 30));
+    assert.deepEqual(docs["2026-11"].seancesEstimation, { [ETU]: 500 });
+    assert.equal(docs["2026-11"].values[ETU].amount, 60);
+    supprimerSeance(docs, "2026-11", "a");
+    assert.equal(docs["2026-11"].values[ETU].amount, 30, "il reste une séance");
+    const ch = supprimerSeance(docs, "2026-11", "b");
+    assert.deepEqual(docs["2026-11"].values[ETU], { amount: 500, received: 0, receivedCash: 0, paid: false });
+    assert.deepEqual(docs["2026-11"].seancesEstimation, {});
+    assert.ok(ch["2026-11"].includes(`seancesEstimation.${ETU}`));
+    // Nouvelle première séance : l'estimation (500 €) est de nouveau mémorisée.
+    ajouterSeance(docs, "c", seance("2026-11-17T18:00", 30));
+    assert.deepEqual(docs["2026-11"].seancesEstimation, { [ETU]: 500 });
+  });
+
+  test("séance déplacée vers un autre mois : estimation rétablie au départ, mémorisée à l'arrivée", () => {
+    const docs = { "2026-11": { values: { [ETU]: { amount: 500, paid: false } } }, "2026-12": { values: { [ETU]: { amount: 250, paid: false } } } };
+    ajouterSeance(docs, "a", seance("2026-11-24T18:00", 30));
+    modifierSeance(docs, "2026-11", "a", { date: "2026-12-01T18:00" });
+    assert.equal(docs["2026-11"].values[ETU].amount, 500);
+    assert.equal(docs["2026-12"].values[ETU].amount, 30);
+    assert.deepEqual(docs["2026-12"].seancesEstimation, { [ETU]: 250 });
+  });
+
+  test("avec un encaissé manuel (base) : estimation rétablie, encaissé gardé", () => {
+    const docs = { "2026-10": { values: { [ETU]: { amount: 510, received: 280, receivedCash: 200, paid: false } } } };
+    ajouterSeance(docs, "a", seance("2026-10-28T18:00", 30));
+    supprimerSeance(docs, "2026-10", "a");
+    assert.deepEqual(docs["2026-10"].values[ETU], { amount: 510, received: 280, receivedCash: 200, recuSeances: 0, aVenir: 230, paid: false });
   });
 });

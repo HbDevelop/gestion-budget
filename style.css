@@ -627,6 +627,70 @@ body {
 .tarif-prompt small { color: var(--text-muted); }
 .tarif-actions { display: flex; flex-wrap: wrap; gap: 6px; }
 
+/* Programmation automatique */
+.sx-prog { border-radius: 12px; background: #fff; border: 1px solid var(--border); }
+.sx-prog summary {
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  cursor: pointer;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--sx-accent);
+}
+.sx-prog summary::-webkit-details-marker { display: none; }
+.sx-prog summary small { flex: 1; font-weight: 500; color: var(--text-muted); }
+.sx-prog[open] summary { border-bottom: 1px solid var(--border); }
+.sx-prog[open] summary .sx-chev { transform: rotate(180deg); }
+.sx-prog-form { padding: 12px; gap: 10px; }
+.sx-prog-form > .sx-field { flex: none; }
+.sx-prog-form > .sx-btn { align-self: flex-start; padding: 8px 18px; }
+.sx-prog-form .sx-btn-primary:disabled { opacity: 0.45; cursor: not-allowed; }
+.sx-days { display: flex; flex-wrap: wrap; gap: 6px; }
+.sx-day { position: relative; cursor: pointer; }
+.sx-day input { position: absolute; opacity: 0; width: 0; height: 0; }
+.sx-day span {
+  width: 36px;
+  height: 36px;
+  display: grid;
+  place-items: center;
+  border-radius: 50%;
+  border: 1px solid var(--border);
+  background: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  color: var(--text-muted);
+  transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, transform 0.1s ease;
+}
+.sx-day:hover span { border-color: #c4b5fd; color: var(--sx-accent); }
+.sx-day input:checked + span { background: var(--sx-accent); border-color: var(--sx-accent); color: #fff; box-shadow: 0 2px 8px rgba(124, 58, 237, 0.3); }
+.sx-day input:focus-visible + span { box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.35); }
+.sx-day input:active + span { transform: scale(0.94); }
+.sx-prog-preview {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  gap: 2px 6px;
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: var(--sx-accent-soft);
+  font-size: 13px;
+}
+.sx-prog-preview small { width: 100%; color: var(--text-muted); font-size: 12px; }
+.sx-prog-hint { color: var(--text-muted); }
+.sx-prog-err { color: var(--danger); font-weight: 600; }
+.sx-flash {
+  padding: 9px 12px;
+  border-radius: 10px;
+  background: var(--sx-ok-soft);
+  border: 1px solid #a7f3d0;
+  color: #047857;
+  font-size: 13px;
+}
+.chip-serie { background: var(--sx-accent-soft); color: var(--sx-accent); padding: 2px 7px; }
+
 @media (max-width: 520px) {
   .sx-kpis { gap: 6px; }
   .sx-kpi { padding: 8px 9px; }
@@ -636,6 +700,9 @@ body {
   .sx-pay { display: grid; grid-template-columns: 1fr 1fr; width: 100%; border-radius: 12px; }
   .sx-paydate { grid-column: 1 / -1; }
   .sx-btn-pay { text-align: center; }
+  .sx-prog summary small { display: none; }
+  .sx-days { gap: 4px; }
+  .sx-day span { width: 33px; height: 33px; }
   .sx-card { grid-template-columns: 44px 1fr auto; gap: 8px; }
   .sx-date b { font-size: 19px; }
   .sx-tarif input { width: 104px; }
