@@ -292,7 +292,70 @@ body {
   background: linear-gradient(180deg, #faf7ff 0%, #ffffff 70%);
   border: 1px solid #ece4fd;
 }
-.calc-cell { color: #6d28d9; font-style: italic; }
+/* Prévisions : montant calculé à partir des séances (même gabarit que .forecast-input) */
+.calc-box {
+  position: relative;
+  width: 90px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px;
+  border: 1px dashed #c4b5fd;
+  border-radius: 6px;
+  padding: 6px 8px;
+  font-size: 13px;
+  line-height: normal;
+  background: #faf7ff;
+  color: #5b21b6;
+  cursor: help;
+  outline: none;
+  transition: border-color 0.15s ease, background 0.15s ease, box-shadow 0.15s ease;
+}
+.calc-box:hover, .calc-box:focus { border-color: #8b5cf6; background: #f5f0ff; box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.2); }
+.calc-val { font-variant-numeric: tabular-nums; line-height: 15px; overflow: hidden; text-overflow: ellipsis; }
+.calc-ico { flex: none; font-size: 10px; line-height: 1; opacity: 0.75; }
+.calc-tip {
+  position: absolute;
+  top: calc(100% + 8px);
+  left: 50%;
+  z-index: 6;
+  width: max-content;
+  max-width: 230px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 9px 11px;
+  border-radius: 10px;
+  background: #1c2331;
+  color: #fff;
+  font-size: 12px;
+  line-height: 1.35;
+  white-space: normal;
+  text-align: left;
+  box-shadow: 0 10px 28px rgba(16, 24, 40, 0.28);
+  pointer-events: none;
+  opacity: 0;
+  visibility: hidden;
+  transform: translate(-50%, -4px);
+  transition: opacity 0.15s ease, transform 0.15s ease, visibility 0.15s;
+}
+.calc-tip::before {
+  content: "";
+  position: absolute;
+  bottom: 100%;
+  left: 50%;
+  transform: translateX(-50%);
+  border: 6px solid transparent;
+  border-bottom-color: #1c2331;
+}
+.calc-tip b { font-size: 12px; color: #ddd6fe; }
+.calc-tip-detail { color: #cbd5e1; }
+.calc-tip small { margin-top: 3px; font-size: 11px; color: #94a3b8; }
+.calc-box:hover .calc-tip, .calc-box:focus .calc-tip { opacity: 1; visibility: visible; transform: translate(-50%, 0); }
+/* Dernières colonnes : étiquette alignée à droite pour rester dans le tableau. */
+.calc-right .calc-tip { left: auto; right: 0; transform: translateY(-4px); }
+.calc-right .calc-tip::before { left: auto; right: 14px; transform: none; }
+.calc-right:hover .calc-tip, .calc-right:focus .calc-tip { transform: translateY(0); }
 
 /* En-tête : icône, titre, bouton d'ouverture du journal */
 .sx-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
@@ -1437,6 +1500,9 @@ body {
   .poste-label { font-size: 11.5px; }
   .forecast-table .cell-label { min-height: 24px; }
   .forecast-input { width: 58px; font-size: 12px; padding: 4px 5px; }
+  .calc-box { width: 58px; font-size: 12px; padding: 4px 5px; }
+  .calc-val { line-height: 14px; }
+  .calc-ico { display: none; }
   .forecast-table .section-row td { font-size: 10.5px; letter-spacing: 0.02em; }
   .forecast-table .subtotal-row td:first-child,
   .forecast-table .total-row td:first-child { white-space: normal; line-height: 1.15; font-size: 10px; font-weight: 700; }
