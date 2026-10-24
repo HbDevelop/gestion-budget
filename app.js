@@ -200,6 +200,17 @@ function cashOf(v) {
   return Math.min(v.receivedCash, receivedOf(v));
 }
 function virementOf(v) { return Math.max(0, receivedOf(v) - cashOf(v)); }
+// Nouveau montant d'un poste. Un revenu remis à 0 n'est plus affiché dans le Suivi : son
+// encaissé (virement/espèces) n'y serait plus modifiable, on l'efface donc avec le montant.
+function withIncomeAmount(item, v, amount) {
+  const next = { ...v, amount };
+  if (item && item.type === "income" && !amount) {
+    next.received = 0;
+    next.receivedCash = 0;
+    next.paid = false;
+  }
+  return next;
+}
 // Somme de tous les soldes bancaires du mois, quelle que soit la clé — y compris d'anciens
 // seaux orphelins (ex. "commun") pas encore réaffectés à une personne.
 function sumBankBalances(data) {
@@ -728,7 +739,8 @@ function buildIncomeRow(item) {
   amountInput.addEventListener("input", () => {
     const c = current();
     const amt = parseFloat(amountInput.value) || 0;
-    commit({ ...c, amount: amt, paid: amt > 0 && receivedOf(c) >= amt });
+    const next = withIncomeAmount(item, c, amt);
+    commit({ ...next, paid: amt > 0 && receivedOf(next) >= amt });
   });
   virInput.addEventListener("input", () => {
     commitSplit(parseFloat(virInput.value) || 0, cashOf(current()));
@@ -1262,7 +1274,8 @@ async function setForecastValue(targetMonthId, itemId, value, monthsByI) {
   }
   const prev = data.values[itemId] || { amount: 0, paid: false };
   // {...prev} : garde l'encaissé (virement/espèces) et les champs de dépense partagée.
-  data.values[itemId] = { ...prev, amount: value };
+  const item = catalog.items.find((it) => it.id === itemId);
+  data.values[itemId] = withIncomeAmount(item, prev, value);
   await persistMonth(targetMonthId, { ...data, updatedAt: new Date().toISOString(), updatedBy: currentUser.email });
   // Mois vierge qu'on vient de matérialiser (valeurs héritées du mois précédent) : on
   // ré-affiche une fois pour montrer ces valeurs. Sinon, on met juste à jour les totaux
