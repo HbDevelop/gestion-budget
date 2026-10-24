@@ -275,6 +275,87 @@ body {
 .recu-bar i { display: block; height: 100%; background: var(--primary); }
 .income-recu.done { color: var(--success); }
 .income-recu.done .recu-bar i { background: var(--success); }
+
+/* ---- Postes à séances (Etude…) : récap du mois + journal des séances ---- */
+.poste-tag-seances { background: #f5f0ff; border-color: #ddd0fb; color: #6d28d9; }
+.btn.small.danger { color: var(--danger); border-color: #fecaca; }
+.btn.small.danger:hover { background: #fef2f2; }
+.seances-block .income-row { display: flex; justify-content: space-between; gap: 8px; }
+.seances-recap {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  margin-left: 2px;
+  font-size: 12.5px;
+  color: var(--text-muted);
+}
+.seances-recap b { color: var(--text); font-weight: 600; }
+.seances-recap small { font-size: 11.5px; }
+.seances-arr { color: #b45309; font-weight: 600; }
+.seances-panel {
+  margin-top: 6px;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.seances-title {
+  margin: 0;
+  font-size: 11.5px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+}
+.seances-list { display: flex; flex-direction: column; gap: 6px; }
+.seances-empty { margin: 0; font-size: 13px; color: var(--text-muted); }
+.seance-row {
+  display: grid;
+  grid-template-columns: minmax(110px, auto) minmax(70px, 1fr) auto;
+  gap: 4px 12px;
+  align-items: center;
+  padding: 8px 10px;
+  border-radius: 8px;
+  background: var(--card-bg);
+  border: 1px solid var(--border);
+  font-size: 13px;
+}
+.seance-row.annulee { opacity: 0.6; }
+.seance-row.annulee .seance-prix { text-decoration: line-through; }
+.seance-date { font-weight: 600; white-space: nowrap; }
+.seance-date small { font-weight: 400; color: var(--text-muted); }
+.seance-prix { font-weight: 600; text-align: right; }
+.seance-st { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 4px 10px; }
+.st { font-size: 12px; white-space: nowrap; }
+.st-faite, .st-payee { color: var(--success); }
+.st-prevue { color: var(--primary-dark); }
+.st-confirmer, .st-due { color: #b45309; }
+.st-annulee { color: var(--text-muted); }
+.seance-actions { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.seance-actions .btn.small, .seance-form .btn.small, .eleve-row .btn.small { padding: 4px 10px; font-size: 12.5px; }
+.seance-paydate, .seance-form input, .seance-form select, .eleve-row input[type="text"], .eleve-row input[type="number"] {
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 13px;
+  background: var(--card-bg);
+  color: var(--text);
+}
+.seance-form { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.seance-form input[name="prix"] { width: 80px; }
+.seance-form-title { width: 100%; font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); }
+.seance-edit { grid-column: 1 / -1; padding-top: 6px; border-top: 1px dashed var(--border); }
+.eleves-box summary { cursor: pointer; font-size: 13px; font-weight: 600; color: var(--text-muted); }
+.eleves-box[open] summary { margin-bottom: 6px; }
+.eleve-row { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin-top: 6px; font-size: 13px; }
+.eleve-row .eleve-nom, .eleve-row input[name="nom"] { flex: 1 1 120px; min-width: 0; }
+.eleve-row .eleve-tarif, .eleve-row input[name="tarif"] { width: 72px; }
+.eleve-row.inactif .eleve-nom { color: var(--text-muted); text-decoration: line-through; }
+.eleve-actif { display: inline-flex; gap: 4px; align-items: center; color: var(--text-muted); }
+.calc-cell { color: #6d28d9; font-style: italic; }
 /* Vue Famille : montant déjà encaissé devant le total pour un revenu partiel */
 .fam-recu { color: var(--text-muted); font-weight: 400; }
 @media (max-width: 640px) {

@@ -61,6 +61,13 @@ export function virementOf(v) { return Math.max(0, receivedOf(v) - cashOf(v)); }
 // Nouveau montant d'un poste. Un revenu remis à 0 n'est plus affiché dans le Suivi : son
 // encaissé (virement/espèces) n'y serait plus modifiable, on l'efface donc avec le montant.
 export function withIncomeAmount(item, v, amount) {
+  // Poste à séances sur un mois sans séance (seances.js) : seul le montant estimé change ;
+  // l'encaissé (dont les paiements de séances d'autres mois) est gardé, le reste à venir suit.
+  if (v && typeof v.aVenir === "number") {
+    const recuManuel = Math.max(0, receivedOf(v) - (v.recuSeances || 0));
+    const aVenir = Math.round(Math.max(0, amount - recuManuel) * 100) / 100;
+    return { ...v, amount, aVenir, paid: amount > 0 && aVenir === 0 };
+  }
   const next = { ...v, amount };
   if (item && item.type === "income" && !amount) {
     next.received = 0;
@@ -89,7 +96,9 @@ export function cashFor(data, scope) {
   return all[scope] || 0;
 }
 
-export function computeTotals(cat, data, scope = "famille") {
+// `opts.arrieres` = { itemId: montant } : séances des mois passés pas encore payées (postes à
+// séances, voir seances.js), ajoutées aux revenus à venir du mois en cours.
+export function computeTotals(cat, data, scope = "famille", opts = {}) {
   const values = (data && data.values) || {};
   let totalIncome = 0;
   let epargneIn = 0;          // "Virement de l'épargne" : reprise sur la réserve, pas un vrai revenu
@@ -104,14 +113,18 @@ export function computeTotals(cat, data, scope = "famille") {
     const v = values[item.id];
     const amount = (v && v.amount) || 0;
     if (item.type === "income") {
+      // Poste à séances calculé (seances.js) : `aVenir` = séances du mois pas encore payées.
+      // L'encaissé peut venir de séances d'autres mois : compté même si le montant du mois est 0.
+      const seances = !!v && typeof v.aVenir === "number";
       totalIncome += amount;
       if (item.role === "epargne_out") epargneIn += amount;
-      revenusAVenir += Math.max(0, amount - receivedOf(v));
+      revenusAVenir += seances ? v.aVenir : Math.max(0, amount - receivedOf(v));
+      revenusAVenir += (opts.arrieres && opts.arrieres[item.id]) || 0;
       // Seulement les revenus prévus ce mois (montant > 0), comme ceux affichés dans le Suivi :
       // un poste remis à 0 garde son ancien `receivedCash` en base, invisible et non modifiable.
-      if (amount > 0) especesRecues += cashOf(v);
+      if (amount > 0 || seances) especesRecues += cashOf(v);
       // Même règle, et sans la reprise sur l'épargne : c'est un transfert interne, pas un revenu.
-      if (amount > 0 && item.role !== "epargne_out") virementsRecus += virementOf(v);
+      if ((amount > 0 || seances) && item.role !== "epargne_out") virementsRecus += virementOf(v);
     } else {
       byGroup[item.type] = (byGroup[item.type] || 0) + amount;
       if (isShared(item)) {

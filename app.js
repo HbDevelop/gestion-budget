@@ -7,13 +7,17 @@ import {
   getFirestore, doc, getDoc as fbGetDoc, setDoc as fbSetDoc, updateDoc as fbUpdateDoc, deleteField,
   collection, getDocs as fbGetDocs, query, orderBy
 } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
-import { isDemoEmail, createDemoStore, DEMO_LABELS } from "./demo.js?v=4";
+import { isDemoEmail, createDemoStore, DEMO_LABELS } from "./demo.js?v=5";
 import {
   monthId, addMonths, isActiveAt, inScope, isShared, receivedOf, cashOf, virementOf,
   withIncomeAmount, sumBankBalances, bankFor, cashFor, computeTotals, cloneForNewMonth,
   setItemValue, setBankBalance, setCashBalance, createChangeSet, saveMonthChanges, createMonth,
   saveForecastValue, zeroItemInMonths
-} from "./budget-core.js?v=2";
+} from "./budget-core.js?v=3";
+import {
+  isSeancesItem, hasSeances, seancesOfItem, monthOfDate, monthsNeeded, ajouterSeance, modifierSeance,
+  payerSeance, annulerPaiement, supprimerSeance, arrieres, elevesOf
+} from "./seances.js?v=1";
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -193,6 +197,10 @@ let currentView = "suivi";
 // Prévisions : vue compacte par défaut (juste le libellé du poste). Le mode édition
 // révèle renommage / espace / interne / suppression / ajout + la barre d'attribution.
 let forecastEdit = false;
+// Postes à séances (seances.js) : séances pas encore payées des mois passés, comptées dans les
+// revenus à venir du mois en cours ; et journaux de séances ouverts dans le Suivi.
+let arrieresSeances = { parPoste: {}, liste: [] };
+const seancesOuverts = new Set();
 let charts = {
   pie: null, pieAvg: null, line: null, investment: null, cap: null, balance: null, occTop: null,
   famIncome: null, famSplit: null, famStack: null
@@ -504,6 +512,7 @@ async function loadMonth(id) {
   monthData = await fetchMonth(id);
   emptyMonthBanner.classList.toggle("hidden", !!monthData);
   if (monthData && !monthData.values) monthData.values = {};
+  await refreshArrieres();
   render();
 }
 
@@ -559,9 +568,10 @@ function hasAmount(item) {
 
 function renderIncome() {
   incomeList.innerHTML = "";
-  const items = catalog.items.filter((it) => it.type === "income" && inScope(it, currentScope) && isActiveAt(it, currentMonthId) && hasAmount(it));
+  // Un poste à séances est toujours affiché : c'est là qu'on enregistre ses séances.
+  const items = catalog.items.filter((it) => it.type === "income" && inScope(it, currentScope) && isActiveAt(it, currentMonthId) && (hasAmount(it) || isSeancesItem(it)));
   $("#income-card").classList.toggle("hidden", !items.length);
-  items.forEach((item) => incomeList.appendChild(buildIncomeRow(item)));
+  items.forEach((item) => incomeList.appendChild(isSeancesItem(item) ? buildSeancesBlock(item) : buildIncomeRow(item)));
 }
 
 // Ligne de revenu : montant attendu + sous-ligne "encaissé X sur Y" avec barre de
@@ -644,6 +654,292 @@ function buildIncomeRow(item) {
   });
 
   return block;
+}
+
+// ---- Postes à séances (seances.js) : journal des séances dans le Suivi ----
+// Impayés des mois passés ajoutés aux revenus à venir : seulement sur le mois en cours.
+function suiviOpts() {
+  return currentMonthId === monthId(new Date()) ? { arrieres: arrieresSeances.parPoste } : {};
+}
+
+async function refreshArrieres() {
+  const ids = catalog ? catalog.items.filter(isSeancesItem).map((it) => it.id) : [];
+  const cur = monthId(new Date());
+  if (!ids.length || currentMonthId !== cur) {
+    arrieresSeances = { parPoste: {}, liste: [] };
+    return;
+  }
+  try {
+    arrieresSeances = arrieres(await fetchAllMonthsAsc(), cur, ids);
+  } catch (e) {
+    console.error(e);
+    arrieresSeances = { parPoste: {}, liste: [] };
+  }
+}
+
+function todayStr() {
+  const d = new Date();
+  return `${monthId(d)}-${String(d.getDate()).padStart(2, "0")}`;
+}
+
+// Date/heure proposée pour une nouvelle séance : aujourd'hui sur le mois en cours, sinon le
+// 1er du mois affiché (18:00).
+function defaultSeanceDate() {
+  const day = currentMonthId === monthId(new Date()) ? todayStr() : `${currentMonthId}-01`;
+  return `${day}T18:00`;
+}
+
+function seanceDateLabel(date) {
+  const [d, t] = date.split("T");
+  const [y, m, j] = d.split("-").map(Number);
+  const jour = new Date(y, m - 1, j).toLocaleDateString("fr-FR", { weekday: "short", day: "2-digit", month: "2-digit" });
+  return `${jour} ${t || ""}`.trim();
+}
+
+function shortDate(d) {
+  const [, m, j] = d.split("-");
+  return `${j}/${m}`;
+}
+
+function eleveNom(item, eleveId) {
+  const e = (item.eleves || []).find((x) => x.id === eleveId);
+  return e ? e.nom : "—";
+}
+
+// Mois à jour pour une opération : le mois affiché (copie locale), sinon relu en base, ou
+// créé à partir du mois précédent s'il n'existe pas encore (séance planifiée loin).
+async function seanceMonthDoc(mid) {
+  if (mid === currentMonthId && monthData) return monthData;
+  let data = await fetchMonth(mid);
+  if (!data) {
+    const prev = await fetchMonth(addMonths(mid, -1));
+    const fresh = prev ? cloneForNewMonth(prev) : { values: {}, bankBalances: {} };
+    const res = await createMonth(monthStore, mid, fresh, saveMeta());
+    data = res.data;
+  }
+  if (!data.values) data.values = {};
+  return data;
+}
+
+// Charge les mois concernés, applique l'opération (seances.js) et enregistre uniquement les
+// champs modifiés de chaque mois. Une erreur de règle (séance déjà payée…) est affichée.
+async function runSeanceOp(op, args, apply) {
+  let changes;
+  const docs = {};
+  try {
+    for (const mid of monthsNeeded(op, args)) docs[mid] = await seanceMonthDoc(mid);
+    changes = apply(docs);
+  } catch (e) {
+    alert(e.message || String(e));
+    return;
+  }
+  const others = Object.keys(changes).filter((mid) => mid !== currentMonthId);
+  if (changes[currentMonthId]) markChanged(changes[currentMonthId]);
+  await withSaveStatus(async () => {
+    for (const mid of others) await saveMonthChanges(monthStore, mid, docs[mid], changes[mid], saveMeta());
+  });
+  if (changes[currentMonthId]) await saveMonth();
+  if (others.some((mid) => mid < monthId(new Date()))) await refreshArrieres();
+  render();
+}
+
+function buildSeancesBlock(item) {
+  const v = monthData.values[item.id] || { amount: 0 };
+  const seances = seancesOfItem(monthData, item.id);
+  const aVenir = typeof v.aVenir === "number" ? v.aVenir : Math.max(0, (v.amount || 0) - receivedOf(v));
+  const arr = arrieresSeances.liste.filter((s) => s.itemId === item.id);
+  const open = seancesOuverts.has(item.id);
+
+  const block = el("div", "income-block seances-block");
+  const head = el("div", "row income-row");
+  head.innerHTML =
+    `<span class="label-text">${escapeHtml(item.label)} <span class="poste-tag poste-tag-seances">séances</span></span>` +
+    `<button type="button" class="btn small seances-toggle${open ? " active" : ""}">Séances (${seances.filter((s) => s.statut !== "annulee").length})</button>`;
+  const recap = el("div", "seances-recap",
+    `<span>Prévu <b>${euros(v.amount || 0)}</b></span>` +
+    `<span>Encaissé <b>${euros(receivedOf(v))}</b>` +
+    (receivedOf(v) ? ` <small>(virement ${euros(virementOf(v))} · espèces ${euros(cashOf(v))})</small>` : "") + `</span>` +
+    `<span>Reste dû <b>${euros(aVenir)}</b></span>` +
+    (arr.length ? `<span class="seances-arr">+ ${euros(arr.reduce((t, s) => t + (s.prix || 0), 0))} à encaisser des mois précédents</span>` : ""));
+  block.append(head, recap);
+  head.querySelector(".seances-toggle").addEventListener("click", () => {
+    if (open) seancesOuverts.delete(item.id); else seancesOuverts.add(item.id);
+    render();
+  });
+  if (!open) return block;
+
+  const panel = el("div", "seances-panel");
+  if (arr.length) {
+    panel.appendChild(el("h4", "seances-title", "À encaisser (mois précédents)"));
+    const list = el("div", "seances-list");
+    arr.forEach((s) => list.appendChild(seanceRow(item, s, s.mois, true)));
+    panel.appendChild(list);
+  }
+  const mois = monthLabel(currentMonthId).toLowerCase();
+  panel.appendChild(el("h4", "seances-title", `Séances ${/^[aeiouyéè]/.test(mois) ? "d'" : "de "}${mois}`));
+  const list = el("div", "seances-list");
+  if (!seances.length) list.appendChild(el("p", "seances-empty", "Aucune séance enregistrée ce mois-ci."));
+  seances.forEach((s) => list.appendChild(seanceRow(item, s, currentMonthId, false)));
+  panel.appendChild(list);
+  panel.appendChild(seanceForm(item));
+  panel.appendChild(elevesEditor(item));
+  block.appendChild(panel);
+  return block;
+}
+
+// Une séance : date, élève, prix, statut, paiement, et les actions possibles.
+function seanceRow(item, s, mois, arriere) {
+  const row = el("div", "seance-row" + (s.statut === "annulee" ? " annulee" : ""));
+  const passee = s.date.slice(0, 10) <= todayStr();
+  const statut = s.statut === "annulee" ? `<span class="st st-annulee">✖ annulée</span>`
+    : s.statut === "faite" ? `<span class="st st-faite">✔ faite</span>`
+    : passee ? `<span class="st st-confirmer">◷ à confirmer</span>` : `<span class="st st-prevue">◷ prévue</span>`;
+  const paye = s.paiement
+    ? `<span class="st st-payee">✔ payée · ${s.paiement.mode === "especes" ? "espèces" : "virement"} · ${shortDate(s.paiement.date)}</span>`
+    : s.statut === "annulee" ? "" : `<span class="st st-due">⏳ non payée</span>`;
+  row.innerHTML =
+    `<span class="seance-date">${seanceDateLabel(s.date)}${arriere ? ` <small>(${monthLabelShort(mois)})</small>` : ""}</span>` +
+    `<span class="seance-eleve">${escapeHtml(eleveNom(item, s.eleveId))}</span>` +
+    `<span class="seance-prix">${euros(s.prix)}</span>` +
+    `<span class="seance-st">${statut}${paye}</span>`;
+  const actions = el("div", "seance-actions");
+  const btn = (label, cls, fn) => {
+    const b = el("button", "btn small " + (cls || ""), label);
+    b.type = "button";
+    b.addEventListener("click", fn);
+    actions.appendChild(b);
+    return b;
+  };
+  const patch = (p) => runSeanceOp("modifier", { mois, patch: p, paiement: s.paiement }, (docs) => modifierSeance(docs, mois, s.id, p));
+
+  if (s.statut === "annulee") {
+    btn("Rétablir", "", () => patch({ statut: "prevue" }));
+  } else {
+    if (s.statut === "prevue") btn("Faite", "", () => patch({ statut: "faite" }));
+    if (!s.paiement) {
+      const date = el("input", "seance-paydate");
+      date.type = "date";
+      date.value = todayStr();
+      date.title = "Date du paiement (compté dans ce mois-là)";
+      actions.appendChild(date);
+      const pay = (mode) => runSeanceOp("payer", { mois, date: date.value }, (docs) => payerSeance(docs, mois, s.id, mode, date.value));
+      btn("Payée virement", "", () => pay("virement"));
+      btn("Payée espèces", "", () => pay("especes"));
+      if (s.statut === "prevue") btn("Annuler la séance", "danger", () => patch({ statut: "annulee" }));
+    } else {
+      btn("Annuler le paiement", "", () => {
+        if (!confirm("Annuler le paiement de cette séance ?")) return;
+        runSeanceOp("annulerPaiement", { mois, paiement: s.paiement }, (docs) => annulerPaiement(docs, mois, s.id));
+      });
+    }
+  }
+  if (!arriere) {
+    btn("Modifier", "", () => {
+      const open = row.querySelector(".seance-edit");
+      if (open) open.remove();
+      else row.appendChild(seanceForm(item, { ...s, mois }));
+    });
+  }
+  row.appendChild(actions);
+  return row;
+}
+
+// Formulaire de séance : nouvelle (sans `edit`) ou modification d'une séance existante.
+function seanceForm(item, edit) {
+  const form = el("form", edit ? "seance-form seance-edit" : "seance-form");
+  const eleves = elevesOf(item).filter((e) => e.actif !== false || (edit && e.id === edit.eleveId));
+  form.innerHTML =
+    (edit ? "" : `<span class="seance-form-title">Nouvelle séance</span>`) +
+    `<input type="datetime-local" name="date" required value="${edit ? edit.date : defaultSeanceDate()}" />` +
+    `<select name="eleve"><option value="">— élève —</option>${eleves.map((e) =>
+      `<option value="${escapeAttr(e.id)}"${edit && edit.eleveId === e.id ? " selected" : ""}>${escapeHtml(e.nom)}</option>`).join("")}</select>` +
+    `<input type="number" name="prix" step="0.01" min="0" placeholder="Prix" required value="${edit ? edit.prix : ""}" />` +
+    (edit ? `<select name="statut">${[["prevue", "prévue"], ["faite", "faite"], ["annulee", "annulée"]].map(([k, l]) =>
+      `<option value="${k}"${edit.statut === k ? " selected" : ""}>${l}</option>`).join("")}</select>` : "") +
+    `<button type="submit" class="btn small primary">${edit ? "Enregistrer" : "Ajouter"}</button>` +
+    (edit && !edit.paiement ? `<button type="button" class="btn small danger seance-del">Supprimer</button>` : "");
+  // Le tarif de l'élève est proposé comme prix (modifiable).
+  form.elements.eleve.addEventListener("change", () => {
+    const e = (item.eleves || []).find((x) => x.id === form.elements.eleve.value);
+    if (e && typeof e.tarif === "number") form.elements.prix.value = e.tarif;
+  });
+  form.addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    const date = form.elements.date.value;
+    const prix = parseFloat(form.elements.prix.value);
+    const eleveId = form.elements.eleve.value || null;
+    if (!date || !(prix >= 0)) return;
+    if (edit) {
+      const p = { date, prix, eleveId, statut: form.elements.statut.value };
+      runSeanceOp("modifier", { mois: edit.mois, patch: p, paiement: edit.paiement }, (docs) => modifierSeance(docs, edit.mois, edit.id, p));
+    } else {
+      const seance = { itemId: item.id, eleveId, date, prix, statut: date.slice(0, 10) < todayStr() ? "faite" : "prevue" };
+      // Séance planifiée sur un autre mois : enregistrée dans ce mois-là, le Suivi reste ici.
+      if (monthOfDate(date) !== currentMonthId) alert(`Séance enregistrée sur ${monthLabel(monthOfDate(date)).toLowerCase()}.`);
+      runSeanceOp("ajouter", { seance }, (docs) => ajouterSeance(docs, uid(), seance));
+    }
+  });
+  const del = form.querySelector(".seance-del");
+  if (del) {
+    del.addEventListener("click", () => {
+      if (!confirm("Supprimer cette séance (saisie erronée) ? Pour une séance qui n'a pas eu lieu, utiliser plutôt « annulée ».")) return;
+      runSeanceOp("supprimer", { mois: edit.mois }, (docs) => supprimerSeance(docs, edit.mois, edit.id));
+    });
+  }
+  return form;
+}
+
+// Élèves du poste (catalogue) : nom, tarif par séance, actif.
+function elevesEditor(item) {
+  const box = el("details", "eleves-box");
+  const list = elevesOf(item);
+  box.innerHTML = `<summary>Élèves (${list.filter((e) => e.actif !== false).length})</summary>`;
+  const save = async () => {
+    await withSaveStatus(() => persistCatalog(catalog));
+    render();
+  };
+  list.forEach((e) => {
+    const row = el("div", "eleve-row" + (e.actif === false ? " inactif" : ""));
+    row.innerHTML =
+      `<input type="text" class="eleve-nom" value="${escapeAttr(e.nom)}" aria-label="Nom" />` +
+      `<input type="number" class="eleve-tarif" step="0.01" min="0" value="${typeof e.tarif === "number" ? e.tarif : ""}" aria-label="Tarif par séance" />` +
+      `<span class="recu-lbl">€ / séance</span>` +
+      `<label class="eleve-actif"><input type="checkbox" ${e.actif === false ? "" : "checked"} /> actif</label>`;
+    const target = () => item.eleves.find((x) => x.id === e.id);
+    row.querySelector(".eleve-nom").addEventListener("change", (ev) => {
+      const nom = ev.target.value.trim();
+      if (nom) { target().nom = nom; save(); }
+    });
+    row.querySelector(".eleve-tarif").addEventListener("change", (ev) => {
+      const t = parseFloat(ev.target.value);
+      target().tarif = t >= 0 ? t : null;
+      save();
+    });
+    row.querySelector(".eleve-actif input").addEventListener("change", (ev) => {
+      target().actif = ev.target.checked;
+      save();
+    });
+    box.appendChild(row);
+  });
+  const add = el("form", "eleve-row eleve-add");
+  add.innerHTML =
+    `<input type="text" name="nom" placeholder="Nouvel élève" required />` +
+    `<input type="number" name="tarif" step="0.01" min="0" placeholder="Tarif" />` +
+    `<span class="recu-lbl">€ / séance</span>` +
+    `<button type="submit" class="btn small">Ajouter</button>`;
+  add.addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    const nom = add.elements.nom.value.trim();
+    if (!nom) return;
+    const t = parseFloat(add.elements.tarif.value);
+    if (!item.eleves) item.eleves = [];
+    item.eleves.push({ id: uid(), nom, tarif: t >= 0 ? t : null, actif: true });
+    seancesOuverts.add(item.id);
+    save();
+  });
+  box.appendChild(add);
+  if (!list.length) box.open = true;
+  return box;
 }
 
 function renderExpenseGroups() {
@@ -779,7 +1075,7 @@ function renderTotals() {
       .forEach((elm) => { if (elm) elm.textContent = euros(0); });
     return;
   }
-  const t = computeTotals(catalog, monthData, currentScope);
+  const t = computeTotals(catalog, monthData, currentScope, suiviOpts());
   totalIncomeEl.textContent = euros(t.revenusReels);
   if (incomeNoteEl) {
     incomeNoteEl.textContent = t.epargneIn > 0 ? "+ " + euros(t.epargneIn) + " repris de l'épargne" : "";
@@ -821,7 +1117,7 @@ function renderFamilleSuivi() {
   }
 
   const days = remainingDays(currentMonthId);
-  const fam = computeTotals(catalog, monthData, "famille");
+  const fam = computeTotals(catalog, monthData, "famille", suiviOpts());
 
   // 1. Cartes résumé, avec ventilation par personne (flux avec l'extérieur du foyer)
   const summary = el("section", "summary summary-fam");
@@ -865,7 +1161,7 @@ function famRealtimePanel(days) {
     `<h2>Suivi en temps réel par espace</h2><span class="live-days"><b>${days}</b> jours restants</span>`));
 
   const totals = {};
-  OWNER_KEYS.forEach((k) => { totals[k] = computeTotals(catalog, monthData, k); });
+  OWNER_KEYS.forEach((k) => { totals[k] = computeTotals(catalog, monthData, k, suiviOpts()); });
   const famBank = sumBankBalances(monthData);
   const famRevenus = OWNER_KEYS.reduce((s, k) => s + totals[k].revenusAVenir, 0);
   const famUpcoming = OWNER_KEYS.reduce((s, k) => s + totals[k].chargesAVenir, 0);
@@ -961,7 +1257,7 @@ function famRtRow(label, values, famValue, markNegative) {
 }
 
 function famPersonBlock(owner) {
-  const t = computeTotals(catalog, monthData, owner);
+  const t = computeTotals(catalog, monthData, owner, suiviOpts());
   const block = el("section", "person-block");
   block.style.setProperty("--pc", ownerColor(owner));
   block.style.setProperty("--pc-bg", ownerBg(owner));
@@ -1058,7 +1354,10 @@ function gridRow(item, ids, monthsByI, opts) {
     const sharedBtn = canShare
       ? `<button type="button" class="toggle-shared-btn${isShared(item) ? " active" : ""}" data-item-id="${item.id}"
           title="${isShared(item) ? "Dépense partagée — cliquer pour retirer" : "Marquer comme dépense partagée (remboursée en partie par l'autre)"}">🤝</button>`
-      : "";
+      : item.type === "income" && item.role !== "epargne_out"
+        ? `<button type="button" class="toggle-shared-btn toggle-seances-btn${isSeancesItem(item) ? " active" : ""}" data-item-id="${item.id}"
+          title="${isSeancesItem(item) ? "Poste à séances — cliquer pour revenir en saisie simple" : "Gérer ce revenu par séances (élèves, paiements, annulations)"}">📅</button>`
+        : "";
     row += `<input type="text" class="rename-input${sharedBtn ? " has-shared-btn" : ""}" value="${escapeAttr(item.label)}" data-item-id="${item.id}" />
       ${sharedBtn}
       <button type="button" class="remove-item-btn" data-item-id="${item.id}" title="Supprimer ce poste">✕</button>`;
@@ -1070,7 +1369,10 @@ function gridRow(item, ids, monthsByI, opts) {
     const data = monthsByI[id];
     const v = data && data.values && data.values[item.id];
     const amount = v ? v.amount : 0;
-    if (opts.editable) {
+    if (opts.editable && isSeancesItem(item) && hasSeances(data, item.id)) {
+      // Mois avec des séances : montant calculé, modifiable seulement via les séances (Suivi).
+      row += `<td class="calc-cell" title="Calculé à partir des séances du mois">${euros(amount)}</td>`;
+    } else if (opts.editable) {
       row += `<td><input class="forecast-input" type="number" step="0.01" value="${amount}"
         data-month-id-attr="${id}" data-item-id="${item.id}" /></td>`;
     } else {
@@ -1154,8 +1456,11 @@ async function renderForecast() {
   forecastTable.querySelectorAll(".remove-item-btn").forEach((btn) => {
     btn.addEventListener("click", () => removeItem(btn.dataset.itemId, ids, monthsByI));
   });
-  forecastTable.querySelectorAll(".toggle-shared-btn").forEach((btn) => {
+  forecastTable.querySelectorAll(".toggle-shared-btn:not(.toggle-seances-btn)").forEach((btn) => {
     btn.addEventListener("click", () => toggleShared(btn.dataset.itemId));
+  });
+  forecastTable.querySelectorAll(".toggle-seances-btn").forEach((btn) => {
+    btn.addEventListener("click", () => toggleSeances(btn.dataset.itemId));
   });
   forecastTable.querySelectorAll(".add-item-btn").forEach((btn) => {
     btn.addEventListener("click", () => addItem(btn.dataset.type));
@@ -1213,6 +1518,27 @@ async function toggleShared(itemId) {
   if (!item) return;
   if (isShared(item)) delete item.role;
   else item.role = "partagee";
+  await persistCatalog(catalog);
+  await renderForecast();
+}
+
+async function toggleSeances(itemId) {
+  const item = catalog.items.find((it) => it.id === itemId);
+  if (!item) return;
+  if (isSeancesItem(item)) {
+    const ok = confirm(`Revenir en saisie simple pour "${item.label}" ?
+
+Les séances déjà enregistrées restent en base ; les mois qui en ont gardent leur montant calculé.`);
+    if (!ok) return;
+    delete item.gestion;
+  } else {
+    const ok = confirm(`Gérer "${item.label}" par séances ?
+
+Dans le Suivi du mois, tu pourras enregistrer chaque séance (date, élève, prix), son paiement (virement ou espèces) ou son annulation. Les mois sans séance gardent leur montant actuel.`);
+    if (!ok) return;
+    item.gestion = "seances";
+    if (!item.eleves) item.eleves = [];
+  }
   await persistCatalog(catalog);
   await renderForecast();
 }
