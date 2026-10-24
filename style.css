@@ -837,9 +837,10 @@ body {
   padding: 4px 0;
 }
 .sx-todo-row .sx-av { width: 22px; height: 22px; font-size: 11px; }
-.sx-todo-info { min-width: 0; display: flex; align-items: baseline; gap: 6px; }
+/* Nom au-dessus, date et prix en dessous : la date reste lisible à côté des boutons. */
+.sx-todo-info { min-width: 0; display: flex; flex-direction: column; gap: 0; }
 .sx-todo-info b { font-size: 13px; font-weight: 600; white-space: nowrap; }
-.sx-todo-info small { font-size: 12px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sx-todo-info small { font-size: 12px; color: var(--text-muted); line-height: 1.3; }
 .sx-todo-row .chip { font-size: 11px; padding: 1px 7px; }
 .sx-todo-actions { display: flex; gap: 4px; }
 .sx-todo-actions .sx-btn { padding: 3px 9px; font-size: 12px; }
