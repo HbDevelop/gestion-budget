@@ -286,12 +286,58 @@ body {
   --sx-warn-soft: #fffbeb;
   --sx-info: #2563eb;
   --sx-info-soft: #eff6ff;
-  gap: 10px;
-  padding: 14px;
-  border-radius: 14px;
-  background: linear-gradient(180deg, #faf7ff 0%, #ffffff 70%);
-  border: 1px solid #ece4fd;
 }
+/* Ligne Etude dans le Suivi : même gabarit qu'un revenu ordinaire. */
+.sx .calc-box { width: 100%; min-height: 34px; padding: 8px 10px; font-size: 14px; }
+.sx .poste-tag-seances { margin-left: 6px; }
+.sx-progress {
+  width: 16px;
+  height: 16px;
+  margin: 0 1px;
+  border-radius: 50%;
+  background: conic-gradient(var(--primary) calc(var(--p, 0) * 1%), var(--border) 0);
+  -webkit-mask: radial-gradient(circle, transparent 3.5px, #000 4px);
+  mask: radial-gradient(circle, transparent 3.5px, #000 4px);
+}
+.sx-progress.done { background: var(--success); -webkit-mask: none; mask: none; position: relative; }
+.sx-progress.done::after {
+  content: "✓";
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  color: #fff;
+  font-size: 10px;
+  font-weight: 800;
+}
+/* Flèche des sections dépliables (programmation, élèves, prochains mois) */
+.sx-chev { display: inline-block; transition: transform 0.2s ease; font-size: 11px; }
+.sx-recu-val { font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
+.income-recu.done .sx-recu-val { color: inherit; }
+.sx-meta {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 2px 12px;
+  margin-left: 26px;
+  font-size: 12px;
+  color: var(--text-muted);
+}
+.sx-meta b { color: var(--text); font-weight: 600; }
+.sx-meta-warn { color: var(--sx-warn); font-weight: 600; }
+.sx-link {
+  margin-left: auto;
+  border: none;
+  background: none;
+  padding: 2px 0;
+  font-size: 12.5px;
+  font-weight: 600;
+  color: var(--sx-accent);
+  cursor: pointer;
+}
+.sx-link:hover { text-decoration: underline; }
+.sx > .sx-flash { margin-left: 26px; padding: 6px 10px; font-size: 12.5px; }
+.sx-open .sx-panel { margin-top: 6px; padding: 12px; border-radius: 12px; background: var(--bg); }
 /* Prévisions : montant calculé à partir des séances (même gabarit que .forecast-input) */
 .calc-box {
   position: relative;
@@ -356,73 +402,6 @@ body {
 .calc-right .calc-tip { left: auto; right: 0; transform: translateY(-4px); }
 .calc-right .calc-tip::before { left: auto; right: 14px; transform: none; }
 .calc-right:hover .calc-tip, .calc-right:focus .calc-tip { transform: translateY(0); }
-
-/* En-tête : icône, titre, bouton d'ouverture du journal */
-.sx-head { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
-.sx-title { display: flex; align-items: center; gap: 10px; min-width: 0; }
-.sx-title b { display: block; font-size: 15px; }
-.sx-title small { display: block; font-size: 12px; color: var(--text-muted); }
-.sx-icon {
-  flex: none;
-  width: 38px;
-  height: 38px;
-  display: grid;
-  place-items: center;
-  border-radius: 12px;
-  background: var(--sx-accent-soft);
-  font-size: 19px;
-}
-.sx-toggle {
-  flex: none;
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  border: none;
-  border-radius: 999px;
-  padding: 7px 14px;
-  background: var(--sx-accent);
-  color: #fff;
-  font-size: 13px;
-  font-weight: 600;
-  cursor: pointer;
-  box-shadow: 0 2px 8px rgba(124, 58, 237, 0.25);
-  transition: transform 0.15s ease, box-shadow 0.15s ease;
-}
-.sx-toggle:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(124, 58, 237, 0.3); }
-.sx-chev { display: inline-block; transition: transform 0.2s ease; font-size: 11px; }
-.sx-open .sx-toggle { background: #fff; color: var(--sx-accent); box-shadow: inset 0 0 0 1px #ddd0fb; }
-.sx-open .sx-toggle .sx-chev { transform: rotate(180deg); }
-
-/* Indicateurs du mois + barre virement / espèces */
-.sx-kpis { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
-.sx-kpi {
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  padding: 10px 12px;
-  border-radius: 12px;
-  background: #fff;
-  border: 1px solid var(--border);
-  min-width: 0;
-}
-.sx-kpi span { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); }
-.sx-kpi b { font-size: 18px; font-weight: 700; font-variant-numeric: tabular-nums; }
-.sx-kpi small { font-size: 11.5px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-.sx-kpi.sx-ok b { color: var(--sx-ok); }
-.sx-kpi.sx-due { background: var(--sx-warn-soft); border-color: #fde68a; }
-.sx-kpi.sx-due b { color: var(--sx-warn); }
-.sx-bar { display: flex; height: 6px; border-radius: 999px; background: #ede9fe; overflow: hidden; }
-.sx-bar i { display: block; height: 100%; transition: width 0.3s ease; }
-.sx-bar-vir { background: linear-gradient(90deg, #10b981, #059669); }
-.sx-bar-cash { background: linear-gradient(90deg, #fbbf24, #f59e0b); }
-.sx-alert {
-  padding: 8px 12px;
-  border-radius: 10px;
-  background: var(--sx-warn-soft);
-  border: 1px solid #fde68a;
-  color: var(--sx-warn);
-  font-size: 12.5px;
-}
 
 /* Journal */
 .sx-panel { display: flex; flex-direction: column; gap: 10px; padding-top: 4px; }
@@ -702,41 +681,56 @@ body {
 .chip-toggle:hover::after, .chip-toggle:focus-visible::after { opacity: 0.8; }
 .chip-toggle:focus-visible { outline: none; box-shadow: 0 0 0 3px rgba(167, 139, 250, 0.35); }
 
-/* Zone « À traiter » (journal fermé) */
+/* Zone « À traiter » (journal fermé) : petites lignes indentées, filet à gauche */
 .sx-todo {
   display: flex;
   flex-direction: column;
-  gap: 6px;
-  padding: 10px;
-  border-radius: 12px;
-  background: #fff;
-  border: 1px solid #fde68a;
-  box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
+  margin: 2px 0 0 26px;
+  padding-left: 10px;
+  border-left: 2px solid #fde68a;
 }
-.sx-todo-head { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; padding: 0 2px 2px; }
-.sx-todo-head b { font-size: 13px; }
-.sx-todo-head span { flex: 1; font-size: 12px; color: var(--text-muted); }
-.sx-todo-all { padding: 4px 10px; font-size: 12px; }
+.sx-todo-head { display: flex; justify-content: flex-end; }
+.sx-todo-all {
+  border: none;
+  background: none;
+  padding: 2px 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--sx-accent);
+  cursor: pointer;
+}
+.sx-todo-all:hover { text-decoration: underline; }
 .sx-todo-row {
   display: grid;
   grid-template-columns: auto 1fr auto auto;
   align-items: center;
   gap: 8px;
-  padding: 6px 4px;
-  border-top: 1px solid #f1f2f4;
+  padding: 4px 0;
 }
-.sx-todo-info { min-width: 0; display: flex; flex-direction: column; }
-.sx-todo-info b { font-size: 13.5px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sx-todo-row .sx-av { width: 22px; height: 22px; font-size: 11px; }
+.sx-todo-info { min-width: 0; display: flex; align-items: baseline; gap: 6px; }
+.sx-todo-info b { font-size: 13px; font-weight: 600; white-space: nowrap; }
 .sx-todo-info small { font-size: 12px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sx-todo-row .chip { font-size: 11px; padding: 1px 7px; }
 .sx-todo-actions { display: flex; gap: 4px; }
-.sx-todo-actions .sx-btn { padding: 5px 10px; }
-.sx-todo-pay { background: var(--bg); font-size: 15px; padding: 3px 10px; }
+.sx-todo-actions .sx-btn { padding: 3px 9px; font-size: 12px; }
+.sx-todo-pay { background: var(--bg); font-size: 13px; padding: 2px 8px; }
+.sx-todo-undo {
+  border: none;
+  background: none;
+  width: 26px;
+  border-radius: 999px;
+  color: var(--text-muted);
+  font-size: 14px;
+  cursor: pointer;
+}
+.sx-todo-undo:hover { background: var(--bg); color: var(--text); }
 .sx-todo-more {
   align-self: flex-start;
   border: none;
   background: none;
-  padding: 4px 2px 0;
-  font-size: 12.5px;
+  padding: 2px 0;
+  font-size: 12px;
   font-weight: 600;
   color: var(--sx-accent);
   cursor: pointer;
@@ -745,6 +739,7 @@ body {
 @media (max-width: 520px) {
   .sx-todo-row { grid-template-columns: auto 1fr auto; }
   .sx-todo-actions { grid-column: 2 / -1; }
+  .sx-todo-info { flex-direction: column; gap: 0; }
 }
 
 /* Prochains mois */
@@ -831,10 +826,6 @@ body {
 .chip-serie { background: var(--sx-accent-soft); color: var(--sx-accent); padding: 2px 7px; }
 
 @media (max-width: 520px) {
-  .sx-kpis { gap: 6px; }
-  .sx-kpi { padding: 8px 9px; }
-  .sx-kpi b { font-size: 15px; }
-  .sx-kpi small { white-space: normal; }
   /* Paiement : date sur une ligne, les deux modes côte à côte en dessous. */
   .sx-pay { display: grid; grid-template-columns: 1fr 1fr; width: 100%; border-radius: 12px; }
   .sx-paydate { grid-column: 1 / -1; }

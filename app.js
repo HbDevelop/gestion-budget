@@ -768,28 +768,36 @@ function buildSeancesBlock(item) {
   const arr = arrieresSeances.liste.filter((s) => s.itemId === item.id);
   const arrTotal = arr.reduce((t, s) => t + (s.prix || 0), 0);
   const open = seancesOuverts.has(item.id);
+  const amount = v.amount || 0;
   const recu = receivedOf(v);
-  // Barre : part virement / espèces de l'encaissé, rapportée au prévu (ou à l'encaissé s'il le dépasse).
-  const base = Math.max(v.amount || 0, recu, 1);
-  const pct = (x) => Math.max(0, Math.min(100, (x / base) * 100)).toFixed(1);
+  const pct = amount > 0 ? Math.max(0, Math.min(100, (recu / amount) * 100)) : (recu > 0 ? 100 : 0);
+  const full = amount > 0 && aVenir === 0;
+  const aTraiter = currentMonthId === monthId(new Date()) ? seancesATraiter(monthData, currentMonthId, arr, item.id, maintenantStr()) : [];
 
+  // Même structure qu'un revenu ordinaire (buildIncomeRow) : ligne principale avec le montant à
+  // droite, sous-ligne virement / espèces / « = encaissé sur prévu » + barre. Les montants
+  // viennent des séances : pas de champs, une pastille de progression à la place de la case.
   const block = el("div", "income-block sx" + (open ? " sx-open" : ""));
-  block.innerHTML =
-    `<div class="sx-head">
-      <div class="sx-title"><span class="sx-icon">🎓</span><div><b>${escapeHtml(item.label)}</b>` +
-      `<small>${actives.length} séance${actives.length > 1 ? "s" : ""} ce mois · paiement à la séance</small></div></div>
-      <button type="button" class="sx-toggle" aria-expanded="${open}">${open ? "Fermer" : "Journal"} <span class="sx-chev">▾</span></button>
-    </div>
-    <div class="sx-kpis">
-      <div class="sx-kpi"><span>Prévu</span><b>${euros(v.amount || 0)}</b></div>
-      <div class="sx-kpi sx-ok"><span>Encaissé</span><b>${euros(recu)}</b>` +
-      (recu ? `<small>💳 ${euros(virementOf(v))} · 💶 ${euros(cashOf(v))}</small>` : "") + `</div>
-      <div class="sx-kpi${aVenir > 0 ? " sx-due" : ""}"><span>Reste dû</span><b>${euros(aVenir)}</b></div>
-    </div>
-    <div class="sx-bar" title="Encaissé : virement ${euros(virementOf(v))}, espèces ${euros(cashOf(v))}">` +
-      `<i class="sx-bar-vir" style="width:${pct(virementOf(v))}%"></i><i class="sx-bar-cash" style="width:${pct(cashOf(v))}%"></i></div>` +
-    (arr.length ? `<div class="sx-alert">⏳ <b>${euros(arrTotal)}</b> à encaisser des mois précédents · ${arr.length} séance${arr.length > 1 ? "s" : ""}</div>` : "");
-  block.querySelector(".sx-toggle").addEventListener("click", () => {
+  const row = el("div", "row income-row");
+  row.innerHTML =
+    `<span class="sx-progress${full ? " done" : ""}" style="--p:${pct.toFixed(1)}" title="${full ? "Tout est payé" : `Encaissé ${euros(recu)} sur ${euros(amount)}`}"></span>` +
+    `<span class="label-text">${escapeHtml(item.label)}<span class="poste-tag poste-tag-seances">séances</span></span>` +
+    calcBox(item, monthData, amount, true, "Modifiable via le journal des séances");
+  const sub = el("div", "income-recu" + (full ? " done" : ""));
+  sub.innerHTML =
+    `<span class="recu-lbl">virement</span><b class="sx-recu-val">${euros(virementOf(v))}</b>` +
+    `<span class="recu-lbl">espèces</span><b class="sx-recu-val">${euros(cashOf(v))}</b>` +
+    `<span class="recu-of">= <b>${euros(recu)}</b> sur <b>${euros(amount)}</b></span>` +
+    `<span class="recu-bar"><i style="width:${pct.toFixed(1)}%"></i></span>`;
+  const meta = el("div", "sx-meta");
+  meta.innerHTML =
+    `<span>📅 ${actives.length} séance${actives.length > 1 ? "s" : ""}</span>` +
+    (aVenir > 0 ? `<span>reste dû <b>${euros(aVenir)}</b></span>` : "") +
+    (arr.length ? `<span class="sx-meta-warn">${euros(arrTotal)} à encaisser (mois précédents)</span>` : "") +
+    (aTraiter.length && !open ? `<span class="sx-meta-warn">${aTraiter.length} à traiter</span>` : "") +
+    `<button type="button" class="sx-link" aria-expanded="${open}">${open ? "Fermer le journal ▴" : "Journal ▸"}</button>`;
+  block.append(row, sub, meta);
+  meta.querySelector(".sx-link").addEventListener("click", () => {
     if (open) seancesOuverts.delete(item.id); else seancesOuverts.add(item.id);
     render();
   });
@@ -969,9 +977,7 @@ function aTraiterZone(item, arr) {
   if (!liste.length) return null;
   const aConfirmer = liste.filter((s) => s.statut === "prevue");
   const zone = el("div", "sx-todo");
-  zone.innerHTML =
-    `<div class="sx-todo-head"><b>À traiter</b><span>${liste.length} séance${liste.length > 1 ? "s" : ""} passée${liste.length > 1 ? "s" : ""}</span></div>`;
-  const head = zone.querySelector(".sx-todo-head");
+  const head = el("div", "sx-todo-head");
   const btn = (parent, label, cls, title, fn) => {
     const b = el("button", cls, label);
     b.type = "button";
@@ -981,7 +987,8 @@ function aTraiterZone(item, arr) {
     return b;
   };
   if (aConfirmer.length > 1) {
-    btn(head, `✓ Tout marquer fait (${aConfirmer.length})`, "sx-btn sx-todo-all", "Marquer faites toutes les séances passées encore prévues", () => {
+    zone.appendChild(head);
+    btn(head, `✓ Tout marquer fait (${aConfirmer.length})`, "sx-todo-all", "Marquer faites toutes les séances passées encore prévues", () => {
       const seances = aConfirmer.map((s) => ({ id: s.id, mois: s.mois }));
       runSeanceOp("faites", { seances }, (docs) => {
         const ch = marquerFaites(docs, seances);
@@ -1001,7 +1008,6 @@ function aTraiterZone(item, arr) {
     const actions = el("div", "sx-todo-actions");
     const statut = (st) => runSeanceOp("modifier", { mois: s.mois, patch: { statut: st } }, (docs) => modifierSeance(docs, s.mois, s.id, { statut: st }));
     if (s.statut === "prevue") btn(actions, "✓ Faite", "sx-btn", "Séance faite (pas encore payée)", () => statut("faite"));
-    else btn(actions, "↺ Pas faite", "sx-btn", "Remettre la séance à confirmer (pas faite)", () => statut("prevue"));
     const payer = (mode) => runSeanceOp("payer", { mois: s.mois, date: todayStr() }, (docs) => {
       const ch = payerEtFaire(docs, s.mois, s.id, mode, todayStr());
       seancesFlash = { itemId: item.id, html: `✓ ${escapeHtml(nom)} · ${euros(s.prix)} encaissés ${mode === "especes" ? "en espèces 💶" : "par virement 💳"}.` };
@@ -1012,6 +1018,8 @@ function aTraiterZone(item, arr) {
       btn(actions, "💳", "sx-btn sx-btn-pay sx-todo-pay", "Payée par virement aujourd'hui", () => payer("virement"));
       btn(actions, "💶", "sx-btn sx-btn-pay sx-todo-pay", "Payée en espèces aujourd'hui", () => payer("especes"));
     }
+    // Action rare : remettre une séance faite à « pas faite » (icône discrète, en dernier).
+    if (s.statut === "faite") btn(actions, "↺", "sx-todo-undo", "Pas faite : remettre la séance à confirmer", () => statut("prevue"));
     row.appendChild(actions);
     zone.appendChild(row);
   });
@@ -1739,7 +1747,7 @@ function gridRow(item, ids, monthsByI, opts) {
 // Case « montant calculé » d'un poste à séances dans Prévisions : même taille que les champs
 // de la grille, bordure pointillée + 🔁, et une étiquette qui détaille les séances du mois.
 // `aDroite` : dernières colonnes, l'étiquette s'aligne à droite pour ne pas sortir du tableau.
-function calcBox(item, data, amount, aDroite) {
+function calcBox(item, data, amount, aDroite, aide = "Modifiable dans le Suivi → journal des séances") {
   const ss = seancesOfItem(data, item.id);
   const nb = (st) => ss.filter((s) => s.statut === st).length;
   const actives = ss.length - nb("annulee");
@@ -1750,7 +1758,7 @@ function calcBox(item, data, amount, aDroite) {
     `<span class="calc-tip" role="tooltip"><b>Calculé à partir des séances</b>` +
     `<span>${actives} séance${actives > 1 ? "s" : ""} · ${euros(amount)}</span>` +
     (detail ? `<span class="calc-tip-detail">${detail}</span>` : "") +
-    `<small>Modifiable dans le Suivi → journal des séances</small></span></div>`;
+    `<small>${aide}</small></span></div>`;
 }
 
 function gridTotalRow(label, ids, monthsByI, getValue, strong, key) {
