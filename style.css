@@ -287,33 +287,46 @@ body {
   --sx-info: #2563eb;
   --sx-info-soft: #eff6ff;
 }
-/* Ligne Etude dans le Suivi : même gabarit qu'un revenu ordinaire. */
-.sx .calc-box { width: 100%; min-height: 34px; padding: 8px 10px; font-size: 14px; }
-.sx .poste-tag-seances { margin-left: 6px; }
-.sx-progress {
-  width: 16px;
-  height: 16px;
-  margin: 0 1px;
-  border-radius: 50%;
-  background: conic-gradient(var(--primary) calc(var(--p, 0) * 1%), var(--border) 0);
-  -webkit-mask: radial-gradient(circle, transparent 3.5px, #000 4px);
-  mask: radial-gradient(circle, transparent 3.5px, #000 4px);
+/* Ligne Etude dans le Suivi : entre un revenu ordinaire et une carte. Léger encadré dont les
+   marges négatives gardent le contenu aligné sur les autres revenus (case, libellé, montant). */
+.sx {
+  gap: 6px;
+  margin: 2px -10px;
+  padding: 10px;
+  border-radius: 12px;
+  background: linear-gradient(180deg, #faf7ff 0%, #fdfcff 100%);
+  border: 1px solid #eee7fd;
 }
-.sx-progress.done { background: var(--success); -webkit-mask: none; mask: none; position: relative; }
-.sx-progress.done::after {
-  content: "✓";
-  position: absolute;
-  inset: 0;
+.sx .calc-box { width: 100%; min-height: 34px; padding: 8px 10px; font-size: 14px; background: #fff; }
+.sx .poste-tag-seances { margin-left: 6px; }
+.sx-icon {
+  width: 18px;
+  height: 18px;
+  margin: 3px; /* même encombrement qu'une case à cocher : libellés alignés */
   display: grid;
   place-items: center;
-  color: #fff;
-  font-size: 10px;
-  font-weight: 800;
+  font-size: 14px;
+  line-height: 1;
 }
-/* Flèche des sections dépliables (programmation, élèves, prochains mois) */
-.sx-chev { display: inline-block; transition: transform 0.2s ease; font-size: 11px; }
-.sx-recu-val { font-weight: 600; color: var(--text); font-variant-numeric: tabular-nums; }
-.income-recu.done .sx-recu-val { color: inherit; }
+.sx .label-text { font-weight: 600; }
+/* Trois chiffres compacts séparés par de fins traits */
+.sx-stats {
+  display: grid;
+  grid-template-columns: 1.3fr 1fr 1fr;
+  margin-left: 26px;
+}
+.sx-stat { display: flex; flex-direction: column; gap: 1px; padding: 0 12px; border-left: 1px solid #e9e3f8; min-width: 0; }
+.sx-stat:first-child { padding-left: 0; border-left: none; }
+.sx-stat span { font-size: 10.5px; font-weight: 700; letter-spacing: 0.05em; text-transform: uppercase; color: var(--text-muted); }
+.sx-stat b { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.sx-stat small { font-size: 11.5px; color: var(--text-muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.sx-stat-ok b { color: var(--sx-ok); }
+.sx-stat-due b { color: var(--sx-warn); }
+/* Barre fine : virement (vert) puis espèces (ambre) */
+.sx-bar { display: flex; height: 4px; margin-left: 26px; border-radius: 999px; background: #ece6fb; overflow: hidden; }
+.sx-bar i { display: block; height: 100%; transition: width 0.3s ease; }
+.sx-bar-vir { background: linear-gradient(90deg, #10b981, #059669); }
+.sx-bar-cash { background: linear-gradient(90deg, #fbbf24, #f59e0b); }
 .sx-meta {
   display: flex;
   flex-wrap: wrap;
@@ -323,7 +336,6 @@ body {
   font-size: 12px;
   color: var(--text-muted);
 }
-.sx-meta b { color: var(--text); font-weight: 600; }
 .sx-meta-warn { color: var(--sx-warn); font-weight: 600; }
 .sx-link {
   margin-left: auto;
@@ -337,7 +349,15 @@ body {
 }
 .sx-link:hover { text-decoration: underline; }
 .sx > .sx-flash { margin-left: 26px; padding: 6px 10px; font-size: 12.5px; }
-.sx-open .sx-panel { margin-top: 6px; padding: 12px; border-radius: 12px; background: var(--bg); }
+.sx-open .sx-panel { margin-top: 4px; padding: 12px; border-radius: 10px; background: #fff; border: 1px solid #eee7fd; }
+@media (max-width: 520px) {
+  .sx-stats { grid-template-columns: 1.4fr 1fr 0.8fr; }
+  .sx-stat { padding: 0 8px; }
+  .sx-stat b { font-size: 14px; }
+  .sx-stat small { white-space: normal; }
+}
+/* Flèche des sections dépliables (programmation, élèves, prochains mois) */
+.sx-chev { display: inline-block; transition: transform 0.2s ease; font-size: 11px; }
 /* Prévisions : montant calculé à partir des séances (même gabarit que .forecast-input) */
 .calc-box {
   position: relative;

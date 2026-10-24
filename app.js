@@ -770,33 +770,37 @@ function buildSeancesBlock(item) {
   const open = seancesOuverts.has(item.id);
   const amount = v.amount || 0;
   const recu = receivedOf(v);
-  const pct = amount > 0 ? Math.max(0, Math.min(100, (recu / amount) * 100)) : (recu > 0 ? 100 : 0);
   const full = amount > 0 && aVenir === 0;
   const aTraiter = currentMonthId === monthId(new Date()) ? seancesATraiter(monthData, currentMonthId, arr, item.id, maintenantStr()) : [];
 
-  // Même structure qu'un revenu ordinaire (buildIncomeRow) : ligne principale avec le montant à
-  // droite, sous-ligne virement / espèces / « = encaissé sur prévu » + barre. Les montants
-  // viennent des séances : pas de champs, une pastille de progression à la place de la case.
-  const block = el("div", "income-block sx" + (open ? " sx-open" : ""));
+  // Entre un revenu ordinaire et une carte : léger encadré, mais même colonnes que les autres
+  // revenus (icône à la place de la case, montant prévu aligné sur les champs voisins), puis
+  // trois chiffres compacts, une barre fine virement / espèces et le lien vers le journal.
+  const block = el("div", "income-block sx" + (open ? " sx-open" : "") + (full ? " sx-full" : ""));
   const row = el("div", "row income-row");
   row.innerHTML =
-    `<span class="sx-progress${full ? " done" : ""}" style="--p:${pct.toFixed(1)}" title="${full ? "Tout est payé" : `Encaissé ${euros(recu)} sur ${euros(amount)}`}"></span>` +
+    `<span class="sx-icon" aria-hidden="true">🎓</span>` +
     `<span class="label-text">${escapeHtml(item.label)}<span class="poste-tag poste-tag-seances">séances</span></span>` +
     calcBox(item, monthData, amount, true, "Modifiable via le journal des séances");
-  const sub = el("div", "income-recu" + (full ? " done" : ""));
-  sub.innerHTML =
-    `<span class="recu-lbl">virement</span><b class="sx-recu-val">${euros(virementOf(v))}</b>` +
-    `<span class="recu-lbl">espèces</span><b class="sx-recu-val">${euros(cashOf(v))}</b>` +
-    `<span class="recu-of">= <b>${euros(recu)}</b> sur <b>${euros(amount)}</b></span>` +
-    `<span class="recu-bar"><i style="width:${pct.toFixed(1)}%"></i></span>`;
+  const base = Math.max(amount, recu, 1);
+  const part = (x) => Math.max(0, Math.min(100, (x / base) * 100)).toFixed(1);
+  const faites = seances.filter((s) => s.statut === "faite").length;
+  const stats = el("div", "sx-stats");
+  stats.innerHTML =
+    `<div class="sx-stat sx-stat-ok"><span>Encaissé</span><b>${euros(recu)}</b>` +
+      `<small>💳 ${euros(virementOf(v))} · 💶 ${euros(cashOf(v))}</small></div>` +
+    `<div class="sx-stat${aVenir > 0 ? " sx-stat-due" : ""}"><span>Reste dû</span><b>${euros(aVenir)}</b>` +
+      (full ? `<small>tout est payé ✓</small>` : "") + `</div>` +
+    `<div class="sx-stat"><span>Séances</span><b>${actives.length}</b>` +
+      `<small>${faites} faite${faites > 1 ? "s" : ""}</small></div>`;
+  const bar = el("div", "sx-bar", `<i class="sx-bar-vir" style="width:${part(virementOf(v))}%"></i><i class="sx-bar-cash" style="width:${part(cashOf(v))}%"></i>`);
+  bar.title = `Encaissé ${euros(recu)} sur ${euros(amount)} (virement ${euros(virementOf(v))}, espèces ${euros(cashOf(v))})`;
   const meta = el("div", "sx-meta");
   meta.innerHTML =
-    `<span>📅 ${actives.length} séance${actives.length > 1 ? "s" : ""}</span>` +
-    (aVenir > 0 ? `<span>reste dû <b>${euros(aVenir)}</b></span>` : "") +
-    (arr.length ? `<span class="sx-meta-warn">${euros(arrTotal)} à encaisser (mois précédents)</span>` : "") +
-    (aTraiter.length && !open ? `<span class="sx-meta-warn">${aTraiter.length} à traiter</span>` : "") +
+    (arr.length ? `<span class="sx-meta-warn">⏳ ${euros(arrTotal)} à encaisser (mois précédents)</span>` : "") +
+    (aTraiter.length && !open ? `<span class="sx-meta-warn">${aTraiter.length} séance${aTraiter.length > 1 ? "s" : ""} à traiter</span>` : "") +
     `<button type="button" class="sx-link" aria-expanded="${open}">${open ? "Fermer le journal ▴" : "Journal ▸"}</button>`;
-  block.append(row, sub, meta);
+  block.append(row, stats, bar, meta);
   meta.querySelector(".sx-link").addEventListener("click", () => {
     if (open) seancesOuverts.delete(item.id); else seancesOuverts.add(item.id);
     render();
