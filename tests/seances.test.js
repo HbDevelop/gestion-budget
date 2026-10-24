@@ -1,0 +1,293 @@
+// Postes à séances (seances.js) : calcul du mois, opérations sur les séances, paiements
+// comptés dans le mois où l'argent arrive, impayés des mois passés, sauvegarde partielle.
+import { test, describe } from "node:test";
+import assert from "node:assert/strict";
+import {
+  isSeancesItem, monthOfDate, seancesOfItem, seancesValue, recomputeItem, monthsNeeded,
+  ajouterSeance, modifierSeance, payerSeance, annulerPaiement, supprimerSeance, arrieres, elevesOf
+} from "../seances.js";
+import { computeTotals, saveMonthChanges, monthPath } from "../budget-core.js";
+import { createFakeFirestore } from "./helpers/fake-firestore.js";
+
+const ETU = "etu";
+const etude = { id: ETU, label: "Etude", type: "income", owner: "marwa", gestion: "seances" };
+const salaire = { id: "sal", label: "Salaire", type: "income", owner: "marwa" };
+const catalog = { items: [etude, salaire] };
+const seance = (date, prix, extra = {}) => ({ itemId: ETU, eleveId: "lina", date, prix, ...extra });
+const empty = () => ({ values: {} });
+
+describe("poste à séances : calcul du mois", () => {
+  test("isSeancesItem / monthOfDate", () => {
+    assert.equal(isSeancesItem(etude), true);
+    assert.equal(isSeancesItem(salaire), false);
+    assert.equal(isSeancesItem(null), false);
+    assert.equal(monthOfDate("2026-10-07T18:00"), "2026-10");
+    assert.equal(monthOfDate("2026-11-03"), "2026-11");
+  });
+
+  test("mois sans séance ni paiement : null (saisie manuelle inchangée)", () => {
+    const d = { values: { [ETU]: { amount: 400, received: 100, receivedCash: 0, paid: false } } };
+    assert.equal(seancesValue(d, ETU), null);
+    assert.deepEqual(recomputeItem(d, ETU), []);
+    assert.deepEqual(d.values[ETU], { amount: 400, received: 100, receivedCash: 0, paid: false });
+  });
+
+  test("prévu = séances non annulées, à venir = non payées, encaissé = paiements du mois", () => {
+    const d = {
+      values: {},
+      seances: {
+        a: seance("2026-10-07T18:00", 25, { statut: "faite", paiement: { mode: "especes", date: "2026-10-07" } }),
+        b: seance("2026-10-09T17:30", 30, { statut: "faite", paiement: null }),
+        c: seance("2026-10-18T10:00", 25, { statut: "annulee", paiement: null }),
+        d: seance("2026-10-28T18:00", 30, { statut: "prevue", paiement: null }),
+        x: { itemId: "autre", date: "2026-10-01T10:00", prix: 99, statut: "faite", paiement: null }
+      },
+      paiementsSeances: {
+        a: { itemId: ETU, prix: 25, mode: "especes", date: "2026-10-07", seanceMois: "2026-10" },
+        z: { itemId: ETU, prix: 40, mode: "virement", date: "2026-10-02", seanceMois: "2026-09" }
+      }
+    };
+    assert.deepEqual(seancesValue(d, ETU), { amount: 85, received: 65, receivedCash: 25, recuSeances: 65, aVenir: 60, paid: false });
+    assert.deepEqual(seancesOfItem(d, ETU).map((s) => s.id), ["a", "b", "c", "d"]);
+  });
+
+  test("tout payé : paid = true ; arrondi au centime", () => {
+    const d = { values: {}, seances: { a: seance("2026-10-07T18:00", 0.1, { statut: "faite", paiement: { mode: "virement", date: "2026-10-07" } }), b: seance("2026-10-08T18:00", 0.2, { statut: "faite", paiement: { mode: "virement", date: "2026-10-08" } }) },
+      paiementsSeances: { a: { itemId: ETU, prix: 0.1, mode: "virement", date: "2026-10-07" }, b: { itemId: ETU, prix: 0.2, mode: "virement", date: "2026-10-08" } } };
+    assert.deepEqual(seancesValue(d, ETU), { amount: 0.3, received: 0.3, receivedCash: 0, recuSeances: 0.3, aVenir: 0, paid: true });
+  });
+
+  test("dernière séance supprimée : retour en saisie manuelle à 0, `aVenir` retiré", () => {
+    const docs = { "2026-10": empty() };
+    ajouterSeance(docs, "s1", seance("2026-10-07T18:00", 25));
+    assert.equal(docs["2026-10"].values[ETU].aVenir, 25);
+    const ch = supprimerSeance(docs, "2026-10", "s1");
+    assert.deepEqual(docs["2026-10"].values[ETU], { amount: 0, received: 0, receivedCash: 0, paid: false });
+    assert.ok(ch["2026-10"].includes(`values.${ETU}.aVenir`));
+  });
+});
+
+describe("rétrocompatibilité : encaissé saisi à la main avant la première séance", () => {
+  test("gardé comme base, le reste estimé est remplacé par les séances", () => {
+    const docs = { "2026-10": { values: { [ETU]: { amount: 510, received: 280, receivedCash: 200, paid: false } } } };
+    const ch = ajouterSeance(docs, "s1", seance("2026-10-28T18:00", 30));
+    const d = docs["2026-10"];
+    assert.deepEqual(d.seancesBase, { [ETU]: { amount: 280, received: 280, receivedCash: 200 } });
+    assert.deepEqual(d.values[ETU], { amount: 310, received: 280, receivedCash: 200, recuSeances: 0, aVenir: 30, paid: false });
+    assert.ok(ch["2026-10"].includes(`seancesBase.${ETU}`));
+  });
+
+  test("pas de base si rien n'avait été encaissé, ni une deuxième fois", () => {
+    const docs = { "2026-10": { values: { [ETU]: { amount: 510, paid: false } } } };
+    ajouterSeance(docs, "s1", seance("2026-10-07T18:00", 25));
+    assert.equal(docs["2026-10"].seancesBase, undefined);
+    assert.deepEqual(docs["2026-10"].values[ETU], { amount: 25, received: 0, receivedCash: 0, recuSeances: 0, aVenir: 25, paid: false });
+    // Mois déjà calculé : un nouvel encaissé ne crée pas de base après coup.
+    const d2 = { "2026-11": { values: { [ETU]: { amount: 0, received: 50, receivedCash: 0, aVenir: 0, paid: false } } } };
+    ajouterSeance(d2, "s2", seance("2026-11-03T18:00", 25));
+    assert.equal(d2["2026-11"].seancesBase, undefined);
+  });
+
+  test("les autres postes du mois ne sont pas touchés", () => {
+    const docs = { "2026-10": { values: { sal: { amount: 2000, received: 2000, paid: true } } } };
+    const ch = ajouterSeance(docs, "s1", seance("2026-10-07T18:00", 25));
+    assert.deepEqual(docs["2026-10"].values.sal, { amount: 2000, received: 2000, paid: true });
+    assert.ok(ch["2026-10"].every((p) => !p.startsWith("values.sal")));
+  });
+});
+
+describe("opérations", () => {
+  test("ajouter : valeurs par défaut et validation", () => {
+    const docs = { "2026-10": empty() };
+    ajouterSeance(docs, "s1", seance("2026-10-07T18:00", 25));
+    assert.deepEqual(docs["2026-10"].seances.s1, { itemId: ETU, eleveId: "lina", date: "2026-10-07T18:00", prix: 25, statut: "prevue", paiement: null });
+    assert.throws(() => ajouterSeance(docs, "s2", seance("2026-10-07", 25)), /Date/);
+    assert.throws(() => ajouterSeance(docs, "s3", seance("2026-10-07T18:00", -1)), /Prix/);
+    assert.throws(() => ajouterSeance(docs, "s4", seance("2026-11-07T18:00", 25)), /non chargé/);
+  });
+
+  test("annuler une séance : sort du prévu (la prévision baisse)", () => {
+    const docs = { "2026-12": empty() };
+    ajouterSeance(docs, "s1", seance("2026-12-02T18:00", 30));
+    ajouterSeance(docs, "s2", seance("2026-12-09T18:00", 30));
+    assert.equal(docs["2026-12"].values[ETU].amount, 60);
+    modifierSeance(docs, "2026-12", "s2", { statut: "annulee" });
+    assert.equal(docs["2026-12"].values[ETU].amount, 30);
+    assert.equal(docs["2026-12"].values[ETU].aVenir, 30);
+    modifierSeance(docs, "2026-12", "s2", { statut: "prevue" });
+    assert.equal(docs["2026-12"].values[ETU].amount, 60);
+  });
+
+  test("payer le même mois, en espèces", () => {
+    const docs = { "2026-10": empty() };
+    ajouterSeance(docs, "s1", seance("2026-10-07T18:00", 25, { statut: "faite" }));
+    const ch = payerSeance(docs, "2026-10", "s1", "especes", "2026-10-07");
+    const d = docs["2026-10"];
+    assert.deepEqual(d.seances.s1.paiement, { mode: "especes", date: "2026-10-07" });
+    assert.deepEqual(d.paiementsSeances.s1, { itemId: ETU, prix: 25, mode: "especes", date: "2026-10-07", seanceMois: "2026-10" });
+    assert.deepEqual(d.values[ETU], { amount: 25, received: 25, receivedCash: 25, recuSeances: 25, aVenir: 0, paid: true });
+    assert.deepEqual(Object.keys(ch), ["2026-10"]);
+  });
+
+  test("séance d'octobre payée en novembre : encaissé compté en novembre", () => {
+    const docs = { "2026-10": empty(), "2026-11": { values: { [ETU]: { amount: 400, paid: false } } } };
+    ajouterSeance(docs, "s1", seance("2026-10-30T18:00", 30, { statut: "faite" }));
+    const ch = payerSeance(docs, "2026-10", "s1", "virement", "2026-11-03");
+    assert.deepEqual(docs["2026-10"].values[ETU], { amount: 30, received: 0, receivedCash: 0, recuSeances: 0, aVenir: 0, paid: true });
+    // Novembre n'a pas de séance : son montant estimé à la main (400 €) reste à venir, et les
+    // 30 € de la séance d'octobre s'ajoutent à son encaissé.
+    assert.deepEqual(docs["2026-11"].values[ETU], { amount: 400, received: 30, receivedCash: 0, recuSeances: 30, aVenir: 400, paid: false });
+    assert.deepEqual(Object.keys(ch).sort(), ["2026-10", "2026-11"]);
+    assert.deepEqual(monthsNeeded("payer", { mois: "2026-10", date: "2026-11-03" }).sort(), ["2026-10", "2026-11"]);
+    // Annuler le paiement remet les deux mois comme avant.
+    annulerPaiement(docs, "2026-10", "s1");
+    assert.equal(docs["2026-10"].values[ETU].aVenir, 30);
+    assert.deepEqual(docs["2026-11"].values[ETU], { amount: 400, received: 0, receivedCash: 0, paid: false });
+    assert.equal(docs["2026-11"].paiementsSeances.s1, undefined);
+  });
+
+  test("règles : pas de paiement double, pas d'annulation ni de suppression d'une séance payée", () => {
+    const docs = { "2026-10": empty() };
+    ajouterSeance(docs, "s1", seance("2026-10-07T18:00", 25));
+    payerSeance(docs, "2026-10", "s1", "virement", "2026-10-08");
+    assert.throws(() => payerSeance(docs, "2026-10", "s1", "virement", "2026-10-08"), /déjà payée/);
+    assert.throws(() => modifierSeance(docs, "2026-10", "s1", { statut: "annulee" }), /paiement/);
+    assert.throws(() => supprimerSeance(docs, "2026-10", "s1"), /paiement/);
+    assert.throws(() => payerSeance(docs, "2026-10", "s1", "cheque", "2026-10-08"), /Mode/);
+    ajouterSeance(docs, "s2", seance("2026-10-09T18:00", 25, { statut: "annulee" }));
+    assert.throws(() => payerSeance(docs, "2026-10", "s2", "virement", "2026-10-09"), /annulée/);
+  });
+
+  test("modifier le prix d'une séance payée : le paiement suit", () => {
+    const docs = { "2026-10": empty(), "2026-11": empty() };
+    ajouterSeance(docs, "s1", seance("2026-10-30T18:00", 30, { statut: "faite" }));
+    payerSeance(docs, "2026-10", "s1", "virement", "2026-11-03");
+    modifierSeance(docs, "2026-10", "s1", { prix: 35 });
+    assert.equal(docs["2026-10"].values[ETU].amount, 35);
+    assert.equal(docs["2026-11"].paiementsSeances.s1.prix, 35);
+    assert.equal(docs["2026-11"].values[ETU].received, 35);
+  });
+
+  test("déplacer une séance sur un autre mois", () => {
+    const docs = { "2026-10": empty(), "2026-11": empty() };
+    ajouterSeance(docs, "s1", seance("2026-10-30T18:00", 30));
+    ajouterSeance(docs, "s0", seance("2026-10-02T18:00", 30));
+    const ch = modifierSeance(docs, "2026-10", "s1", { date: "2026-11-04T18:00" });
+    assert.equal(docs["2026-10"].seances.s1, undefined);
+    assert.equal(docs["2026-11"].seances.s1.date, "2026-11-04T18:00");
+    assert.equal(docs["2026-10"].values[ETU].amount, 30);
+    assert.equal(docs["2026-11"].values[ETU].amount, 30);
+    assert.deepEqual(Object.keys(ch).sort(), ["2026-10", "2026-11"]);
+    assert.deepEqual(monthsNeeded("modifier", { mois: "2026-10", patch: { date: "2026-11-04T18:00" } }).sort(), ["2026-10", "2026-11"]);
+  });
+});
+
+describe("Prévisions sur un mois touché par les séances", () => {
+  test("mois sans séance : le montant estimé reste modifiable, l'encaissé des séances est gardé", async () => {
+    const { withIncomeAmount } = await import("../budget-core.js");
+    const v = { amount: 400, received: 30, receivedCash: 0, recuSeances: 30, aVenir: 400, paid: false };
+    assert.deepEqual(withIncomeAmount(etude, v, 350), { ...v, amount: 350, aVenir: 350 });
+    assert.deepEqual(withIncomeAmount(etude, v, 0), { ...v, amount: 0, aVenir: 0, paid: false });
+    // Avec une base manuelle (encaissé saisi avant les séances) : déduite du reste à venir.
+    const w = { amount: 510, received: 310, receivedCash: 200, recuSeances: 30, aVenir: 230, paid: false };
+    assert.equal(withIncomeAmount(etude, w, 600).aVenir, 320);
+  });
+
+  test("dernière séance retirée : le montant calculé retombe à 0, même avec un paiement d'un autre mois", () => {
+    const docs = { "2026-11": empty() };
+    ajouterSeance(docs, "s1", seance("2026-11-04T18:00", 30));
+    docs["2026-11"].paiementsSeances = { s0: { itemId: ETU, prix: 25, mode: "especes", date: "2026-11-02", seanceMois: "2026-10" } };
+    recomputeItem(docs["2026-11"], ETU);
+    assert.equal(docs["2026-11"].values[ETU].amount, 30);
+    supprimerSeance(docs, "2026-11", "s1");
+    assert.deepEqual(docs["2026-11"].values[ETU], { amount: 0, received: 25, receivedCash: 25, recuSeances: 25, aVenir: 0, paid: false });
+  });
+
+  test("recalcul après une séance d'un autre mois payée : le montant manuel n'est pas écrasé", () => {
+    const d = { values: { [ETU]: { amount: 400, received: 0, paid: false } },
+      paiementsSeances: { s1: { itemId: ETU, prix: 30, mode: "virement", date: "2026-11-03", seanceMois: "2026-10" } } };
+    recomputeItem(d, ETU);
+    assert.equal(d.values[ETU].amount, 400);
+    assert.equal(d.values[ETU].aVenir, 400);
+  });
+});
+
+describe("impayés des mois passés et totaux", () => {
+  const months = [
+    { id: "2026-08", data: { seances: { a: seance("2026-08-20T18:00", 25, { statut: "faite" }) } } },
+    { id: "2026-09", data: { seances: {
+      b: seance("2026-09-10T18:00", 30, { statut: "faite", paiement: { mode: "virement", date: "2026-09-10" } }),
+      c: seance("2026-09-12T18:00", 30, { statut: "annulee" }),
+      d: seance("2026-09-29T18:00", 30, { statut: "prevue" }),
+      e: { itemId: "autre", date: "2026-09-01T10:00", prix: 99, statut: "faite", paiement: null }
+    } } },
+    { id: "2026-10", data: { seances: { f: seance("2026-10-07T18:00", 25) } } }
+  ];
+
+  test("arrieres : non annulées, non payées, mois strictement avant", () => {
+    const r = arrieres(months, "2026-10", [ETU]);
+    assert.deepEqual(r.parPoste, { [ETU]: 55 });
+    assert.deepEqual(r.liste.map((s) => [s.id, s.mois]), [["a", "2026-08"], ["d", "2026-09"]]);
+    assert.deepEqual(arrieres(months, "2026-08", [ETU]).liste, []);
+  });
+
+  test("computeTotals : à venir des séances + impayés passés ; encaissé compté même à montant 0", () => {
+    const data = { values: {
+      [ETU]: { amount: 0, received: 30, receivedCash: 10, aVenir: 0, paid: false },
+      sal: { amount: 2000, received: 0, receivedCash: 0, paid: false }
+    } };
+    const t = computeTotals(catalog, data, "marwa");
+    assert.equal(t.revenusAVenir, 2000);
+    assert.equal(t.especesRecues, 10);
+    assert.equal(t.virementsRecus, 20);
+    const t2 = computeTotals(catalog, data, "marwa", { arrieres: { [ETU]: 55 } });
+    assert.equal(t2.revenusAVenir, 2055);
+    assert.equal(t2.soldeProjete - t.soldeProjete, 55);
+    // Impayés d'un poste hors de l'espace affiché : ignorés.
+    assert.equal(computeTotals(catalog, data, "habib", { arrieres: { [ETU]: 55 } }).revenusAVenir, 0);
+  });
+
+  test("computeTotals : poste calculé, à venir = séances non payées (pas montant − encaissé)", () => {
+    const data = { values: { [ETU]: { amount: 85, received: 65, receivedCash: 25, aVenir: 60, paid: false } } };
+    assert.equal(computeTotals(catalog, data, "marwa").revenusAVenir, 60);
+  });
+});
+
+describe("élèves", () => {
+  test("actifs d'abord, puis par nom", () => {
+    const item = { eleves: [{ id: "1", nom: "Zoé", tarif: 20 }, { id: "2", nom: "adam", tarif: 30, actif: false }, { id: "3", nom: "Lina", tarif: 25 }] };
+    assert.deepEqual(elevesOf(item).map((e) => e.nom), ["Lina", "Zoé", "adam"]);
+    assert.deepEqual(elevesOf({}), []);
+  });
+});
+
+describe("sauvegarde partielle des opérations", () => {
+  test("seuls les champs touchés partent en base ; un autre appareil n'est pas écrasé", async () => {
+    const store = createFakeFirestore({
+      [monthPath("2026-10")]: { values: { sal: { amount: 2000, paid: false }, [ETU]: { amount: 510, received: 280, receivedCash: 200, paid: false } } },
+      [monthPath("2026-11")]: { values: { sal: { amount: 2000, paid: false } } }
+    });
+    const load = async (id) => (await store.getDoc(monthPath(id))).data();
+    const docs = { "2026-10": await load("2026-10"), "2026-11": await load("2026-11") };
+    // Un autre appareil modifie le salaire entre-temps.
+    await store.updateDoc(monthPath("2026-10"), { "values.sal.paid": true });
+
+    const ch = {};
+    const merge = (c) => Object.entries(c).forEach(([m, p]) => { ch[m] = [...(ch[m] || []), ...p]; });
+    merge(ajouterSeance(docs, "s1", seance("2026-10-30T18:00", 30, { statut: "faite" })));
+    merge(payerSeance(docs, "2026-10", "s1", "especes", "2026-11-02"));
+    for (const [m, paths] of Object.entries(ch)) {
+      await saveMonthChanges(store, m, docs[m], paths, { updatedAt: "t", updatedBy: "u" });
+    }
+
+    const oct = (await store.getDoc(monthPath("2026-10"))).data();
+    const nov = (await store.getDoc(monthPath("2026-11"))).data();
+    assert.equal(oct.values.sal.paid, true, "modif de l'autre appareil conservée");
+    assert.deepEqual(oct.values[ETU], { amount: 310, received: 280, receivedCash: 200, recuSeances: 0, aVenir: 0, paid: true });
+    assert.deepEqual(oct.seancesBase[ETU], { amount: 280, received: 280, receivedCash: 200 });
+    assert.equal(oct.seances.s1.paiement.date, "2026-11-02");
+    assert.deepEqual(nov.values[ETU], { amount: 0, received: 30, receivedCash: 30, recuSeances: 30, aVenir: 0, paid: false });
+    assert.equal(nov.values.sal.amount, 2000);
+    assert.equal(nov.paiementsSeances.s1.seanceMois, "2026-10");
+  });
+});

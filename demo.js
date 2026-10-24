@@ -4,6 +4,8 @@
 // rechargement). Le compte de démo ne doit PAS figurer dans les règles Firestore : même en
 // contournant l'appli, il n'a ainsi aucun accès aux vraies données.
 
+import { ajouterSeance, payerSeance } from "./seances.js?v=1";
+
 // Empreinte SHA-256 de l'adresse du compte de démo (en minuscules) : l'adresse elle-même ne
 // figure pas dans ce dépôt public. Pour changer de compte de démo, remplacer cette empreinte.
 const DEMO_EMAIL_SHA256 = "5a9a5a55347a1790fdc806a05bca35535ef6e9510ee492a16dbd638bd8eb1264";
@@ -55,6 +57,12 @@ function buildDemoData(owners) {
     item("d-reprise-a", "Virement de l'épargne", "income", a, { role: "epargne_out" }),
     item("d-sal-b", "Salaire", "income", b),
     item("d-caf-b", "Allocations familiales", "income", b),
+    // Poste à séances (seances.js) : cours particuliers, payés séance par séance.
+    item("d-cours-b", "Cours particuliers", "income", b, { gestion: "seances", eleves: [
+      { id: "el-ines", nom: "Inès", tarif: 25, actif: true },
+      { id: "el-noah", nom: "Noah", tarif: 30, actif: true },
+      { id: "el-sami", nom: "Sami", tarif: 25, actif: false }
+    ] }),
     item("d-loyer", "Loyer", "regulieres", a),
     item("d-elec", "Électricité", "regulieres", a),
     item("d-box", "Box internet", "regulieres", a),
@@ -86,6 +94,8 @@ function buildDemoData(owners) {
     return {
       "d-sal-a": 3150, "d-prime-a": m === 3 ? 2500 : 0, "d-reprise-a": id === addMonths(cur, -8) ? 600 : 0,
       "d-sal-b": 2480, "d-caf-b": 141.99,
+      // Avant les séances enregistrées (deux derniers mois) : montant saisi à la main.
+      "d-cours-b": id < addMonths(cur, -1) ? 160 : id > cur ? 180 : 0,
       "d-loyer": 1180, "d-elec": m >= 11 || m <= 2 ? 112 : 74, "d-box": 29.99, "d-mob-a": 12.99,
       "d-assu-auto": 54.3, "d-essence": between(90, 145), "d-abos": 27.98,
       "d-courses": between(410, 530), "d-creche": 380, "d-mutuelle": 42.5, "d-transport": 86.4, "d-mob-b": 9.99,
@@ -106,7 +116,7 @@ function buildDemoData(owners) {
     const values = {};
     Object.entries(amounts).forEach(([itemId, amount], i) => {
       if (!amount) return;
-      const income = itemId.startsWith("d-sal") || itemId.startsWith("d-caf") || itemId.startsWith("d-prime") || itemId.startsWith("d-reprise");
+      const income = itemId.startsWith("d-sal") || itemId.startsWith("d-caf") || itemId.startsWith("d-prime") || itemId.startsWith("d-reprise") || itemId.startsWith("d-cours");
       // Mois passés : tout est payé / reçu. Mois en cours : salaires reçus, environ la moitié des
       // dépenses payées. Mois futurs : rien encore.
       const done = id < cur || (id === cur && (income ? itemId.startsWith("d-sal") : i % 2 === 0));
@@ -118,6 +128,8 @@ function buildDemoData(owners) {
       months[id].cashBalances = { [a]: 60, [b]: 35 };
     }
   });
+
+  addDemoSeances(months, cur);
 
   const settings = {
     byScope: {
@@ -136,6 +148,29 @@ function buildDemoData(owners) {
   };
 
   return { "meta/catalog": { items }, "meta/settings": settings, months };
+}
+
+// Séances du mois dernier (toutes faites, une pas encore payée) et du mois en cours (faites
+// avant aujourd'hui, une annulée, les suivantes prévues), via les mêmes opérations que l'appli.
+function addDemoSeances(months, cur) {
+  const prev = addMonths(cur, -1);
+  const today = new Date().getDate();
+  const add = (mid, day, eleveId, prix, statut, pay) => {
+    const id = `d-s-${mid}-${day}`;
+    const date = `${mid}-${String(day).padStart(2, "0")}`;
+    ajouterSeance(months, id, { itemId: "d-cours-b", eleveId, date: `${date}T18:00`, prix, statut });
+    if (pay) payerSeance(months, mid, id, pay, date);
+  };
+  [[3, "el-ines", 25, "especes"], [6, "el-noah", 30, "virement"], [10, "el-ines", 25, "especes"],
+    [13, "el-noah", 30, "virement"], [20, "el-ines", 25, "especes"], [27, "el-noah", 30, null]]
+    .forEach(([day, el, prix, pay]) => add(prev, day, el, prix, "faite", pay));
+  [[2, "el-ines", 25], [5, "el-noah", 30], [9, "el-ines", 25], [12, "el-noah", 30], [16, "el-ines", 25],
+    [19, "el-noah", 30], [23, "el-ines", 25], [26, "el-noah", 30]]
+    .forEach(([day, el, prix], i) => {
+      if (day >= today) return add(cur, day, el, prix, "prevue", null);
+      if (i === 2) return add(cur, day, el, prix, "annulee", null);
+      add(cur, day, el, prix, "faite", i === 3 ? null : i % 2 ? "virement" : "especes");
+    });
 }
 
 // Marqueur de suppression d'un champ (voir deleteField du store).
