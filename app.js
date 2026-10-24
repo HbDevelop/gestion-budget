@@ -255,7 +255,9 @@ function computeTotals(cat, data, scope = "famille") {
       totalIncome += amount;
       if (item.role === "epargne_out") epargneIn += amount;
       revenusAVenir += Math.max(0, amount - receivedOf(v));
-      especesRecues += cashOf(v);
+      // Seulement les revenus prévus ce mois (montant > 0), comme ceux affichés dans le Suivi :
+      // un poste remis à 0 garde son ancien `receivedCash` en base, invisible et non modifiable.
+      if (amount > 0) especesRecues += cashOf(v);
     } else {
       byGroup[item.type] = (byGroup[item.type] || 0) + amount;
       if (isShared(item)) {
