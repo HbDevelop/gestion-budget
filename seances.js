@@ -195,7 +195,7 @@ export function monthsNeeded(op, args) {
   if (op === "supprimer") out.add(args.mois);
   if (op === "tarif") args.seances.forEach((s) => { out.add(s.mois); if (s.paiement) out.add(monthOfDate(s.paiement.date)); });
   if (op === "programmer") args.dates.forEach((d) => out.add(monthOfDate(d)));
-  if (op === "supprimerListe") args.seances.forEach((s) => out.add(s.mois));
+  if (op === "supprimerListe" || op === "faites") args.seances.forEach((s) => out.add(s.mois));
   return [...out];
 }
 
@@ -430,6 +430,47 @@ export function seancesFutures(months, apresMois, itemIds) {
     });
   });
   return out.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+}
+
+// ---- Saisie rapide (zone « À traiter » du Suivi) ----
+
+// Séances déjà passées (date et heure <= `maintenant`, "AAAA-MM-JJTHH:MM") encore à traiter :
+// pas encore marquées faites, ou pas encore payées. Séances du mois `data` (mois `mois`)
+// + impayés des mois précédents (`arr`, voir arrieres). Triées de la plus ancienne à la plus
+// récente. Les séances annulées sont ignorées.
+export function seancesATraiter(data, mois, arr, itemId, maintenant) {
+  const out = [];
+  seancesOfItem(data, itemId).forEach((s) => {
+    if (s.statut === "annulee" || s.date > maintenant) return;
+    if (s.statut === "faite" && s.paiement) return;
+    out.push({ ...s, mois });
+  });
+  (arr || []).forEach((s) => {
+    if (s.itemId !== itemId || s.statut === "annulee" || s.paiement || s.date > maintenant) return;
+    out.push({ ...s });
+  });
+  return out.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+}
+
+// Paiement en un geste : une séance encore « prévue » (déjà passée) est aussi marquée faite.
+export function payerEtFaire(docs, mois, id, mode, date) {
+  const s = getSeance(docs, mois, id);
+  const changes = {};
+  const merge = (c) => Object.entries(c).forEach(([m, p]) => addChanges(changes, m, p));
+  if (s.statut === "prevue") merge(modifierSeance(docs, mois, id, { statut: "faite" }));
+  merge(payerSeance(docs, mois, id, mode, date));
+  return changes;
+}
+
+// Plusieurs séances marquées faites d'un coup (`seances` = [{ id, mois }]).
+export function marquerFaites(docs, seances) {
+  const changes = {};
+  seances.forEach((s) => {
+    const cur = getSeance(docs, s.mois, s.id);
+    if (cur.statut !== "prevue") return;
+    Object.entries(modifierSeance(docs, s.mois, s.id, { statut: "faite" })).forEach(([m, p]) => addChanges(changes, m, p));
+  });
+  return changes;
 }
 
 // Élèves d'un poste (copie triée par nom, actifs d'abord).

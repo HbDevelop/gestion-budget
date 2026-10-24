@@ -7,7 +7,7 @@ import {
   getFirestore, doc, getDoc as fbGetDoc, setDoc as fbSetDoc, updateDoc as fbUpdateDoc, deleteField,
   collection, getDocs as fbGetDocs, query, orderBy
 } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
-import { isDemoEmail, createDemoStore, DEMO_LABELS } from "./demo.js?v=9";
+import { isDemoEmail, createDemoStore, DEMO_LABELS } from "./demo.js?v=10";
 import {
   monthId, addMonths, isActiveAt, inScope, isShared, receivedOf, cashOf, virementOf,
   withIncomeAmount, sumBankBalances, bankFor, cashFor, computeTotals, cloneForNewMonth,
@@ -17,8 +17,9 @@ import {
 import {
   isSeancesItem, hasSeances, seancesOfItem, monthOfDate, monthsNeeded, ajouterSeance, modifierSeance,
   payerSeance, annulerPaiement, supprimerSeance, arrieres, elevesOf, seancesATarifer, appliquerTarif,
-  datesRecurrentes, programmerSeances, seancesSerie, supprimerSeances, seancesFutures
-} from "./seances.js?v=5";
+  datesRecurrentes, programmerSeances, seancesSerie, supprimerSeances, seancesFutures,
+  seancesATraiter, payerEtFaire, marquerFaites
+} from "./seances.js?v=6";
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -792,13 +793,17 @@ function buildSeancesBlock(item) {
     if (open) seancesOuverts.delete(item.id); else seancesOuverts.add(item.id);
     render();
   });
-  if (!open) return block;
-
-  const panel = el("div", "sx-panel");
   if (seancesFlash && seancesFlash.itemId === item.id) {
-    panel.appendChild(el("div", "sx-flash", seancesFlash.html));
+    block.appendChild(el("div", "sx-flash", seancesFlash.html));
     seancesFlash = null;
   }
+  if (!open) {
+    const todo = aTraiterZone(item, arr);
+    if (todo) block.appendChild(todo);
+    return block;
+  }
+
+  const panel = el("div", "sx-panel");
   if (arr.length) {
     panel.appendChild(el("div", "sx-section", `<h4>À encaisser</h4><span>mois précédents</span>`));
     const list = el("div", "sx-list");
@@ -937,6 +942,74 @@ function seanceRow(item, s, mois, mode = "courant") {
   more.appendChild(menu);
   if (menu.children.length) card.appendChild(more);
   return card;
+}
+
+// Date et heure locales actuelles, au format des séances ("AAAA-MM-JJTHH:MM").
+function maintenantStr() {
+  const d = new Date();
+  return `${todayStr()}T${String(d.getHours()).padStart(2, "0")}:${String(d.getMinutes()).padStart(2, "0")}`;
+}
+
+// Zone « À traiter » (journal fermé) : séances passées pas encore faites ou pas encore payées,
+// à valider en un clic. Payer (daté d'aujourd'hui) marque aussi la séance faite.
+const A_TRAITER_MAX = 5;
+function aTraiterZone(item, arr) {
+  if (currentMonthId !== monthId(new Date())) return null;
+  const liste = seancesATraiter(monthData, currentMonthId, arr, item.id, maintenantStr());
+  if (!liste.length) return null;
+  const aConfirmer = liste.filter((s) => s.statut === "prevue");
+  const zone = el("div", "sx-todo");
+  zone.innerHTML =
+    `<div class="sx-todo-head"><b>À traiter</b><span>${liste.length} séance${liste.length > 1 ? "s" : ""} passée${liste.length > 1 ? "s" : ""}</span></div>`;
+  const head = zone.querySelector(".sx-todo-head");
+  const btn = (parent, label, cls, title, fn) => {
+    const b = el("button", cls, label);
+    b.type = "button";
+    if (title) b.title = title;
+    b.addEventListener("click", fn);
+    parent.appendChild(b);
+    return b;
+  };
+  if (aConfirmer.length > 1) {
+    btn(head, `✓ Tout marquer fait (${aConfirmer.length})`, "sx-btn sx-todo-all", "Marquer faites toutes les séances passées encore prévues", () => {
+      const seances = aConfirmer.map((s) => ({ id: s.id, mois: s.mois }));
+      runSeanceOp("faites", { seances }, (docs) => {
+        const ch = marquerFaites(docs, seances);
+        seancesFlash = { itemId: item.id, html: `✓ ${seances.length} séances marquées faites.` };
+        return ch;
+      });
+    });
+  }
+  liste.slice(0, A_TRAITER_MAX).forEach((s) => {
+    const nom = eleveNom(item, s.eleveId);
+    const row = el("div", "sx-todo-row");
+    row.innerHTML =
+      eleveAvatar(item, s.eleveId) +
+      `<div class="sx-todo-info"><b>${escapeHtml(nom)}</b><small>${seanceDateLabel(s.date)}` +
+      (s.mois !== currentMonthId ? ` (${monthLabelShort(s.mois)})` : "") + ` · ${euros(s.prix)}</small></div>` +
+      (s.statut === "prevue" ? `<span class="chip chip-confirmer">À confirmer</span>` : `<span class="chip chip-due">Non payée</span>`);
+    const actions = el("div", "sx-todo-actions");
+    if (s.statut === "prevue") {
+      btn(actions, "✓ Faite", "sx-btn", "Séance faite (pas encore payée)", () =>
+        runSeanceOp("modifier", { mois: s.mois, patch: { statut: "faite" } }, (docs) => modifierSeance(docs, s.mois, s.id, { statut: "faite" })));
+    }
+    const payer = (mode) => runSeanceOp("payer", { mois: s.mois, date: todayStr() }, (docs) => {
+      const ch = payerEtFaire(docs, s.mois, s.id, mode, todayStr());
+      seancesFlash = { itemId: item.id, html: `✓ ${escapeHtml(nom)} · ${euros(s.prix)} encaissés ${mode === "especes" ? "en espèces 💶" : "par virement 💳"}.` };
+      return ch;
+    });
+    btn(actions, "💳", "sx-btn sx-btn-pay sx-todo-pay", "Payée par virement aujourd'hui", () => payer("virement"));
+    btn(actions, "💶", "sx-btn sx-btn-pay sx-todo-pay", "Payée en espèces aujourd'hui", () => payer("especes"));
+    row.appendChild(actions);
+    zone.appendChild(row);
+  });
+  if (liste.length > A_TRAITER_MAX) {
+    btn(zone, `+ ${liste.length - A_TRAITER_MAX} autre${liste.length - A_TRAITER_MAX > 1 ? "s" : ""} dans le journal`, "sx-todo-more", "", () => {
+      seancesOuverts.add(item.id);
+      render();
+    });
+  }
+  return zone;
 }
 
 // Section « Prochains mois » : séances déjà planifiées après le mois en cours, par mois,

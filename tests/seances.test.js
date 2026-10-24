@@ -6,7 +6,7 @@ import {
   isSeancesItem, monthOfDate, seancesOfItem, seancesValue, recomputeItem, monthsNeeded,
   ajouterSeance, modifierSeance, payerSeance, annulerPaiement, supprimerSeance, arrieres, elevesOf,
   seancesATarifer, appliquerTarif, datesRecurrentes, programmerSeances, seancesSerie, supprimerSeances,
-  MAX_PROGRAMMATION, seancesFutures
+  MAX_PROGRAMMATION, seancesFutures, seancesATraiter, payerEtFaire, marquerFaites
 } from "../seances.js";
 import { computeTotals, saveMonthChanges, monthPath } from "../budget-core.js";
 import { createFakeFirestore } from "./helpers/fake-firestore.js";
@@ -462,5 +462,60 @@ describe("séances des prochains mois", () => {
     assert.equal(docs["2026-12"].seances.d.date, "2026-12-08T17:00");
     assert.equal(docs["2026-12"].values[ETU].amount, 30);
     assert.deepEqual(Object.keys(ch), ["2026-12"]);
+  });
+});
+
+describe("saisie rapide : séances passées à traiter", () => {
+  const build = () => {
+    const docs = { "2026-09": empty(), "2026-10": empty() };
+    ajouterSeance(docs, "sept", seance("2026-09-29T18:00", 30, { statut: "faite" }));     // impayé passé
+    ajouterSeance(docs, "fini", seance("2026-10-02T18:00", 25, { statut: "faite" }));
+    payerSeance(docs, "2026-10", "fini", "especes", "2026-10-02");                          // faite et payée
+    ajouterSeance(docs, "aConf", seance("2026-10-20T18:00", 25));                            // prévue passée
+    ajouterSeance(docs, "nonPaye", seance("2026-10-22T18:00", 30, { statut: "faite" }));    // faite non payée
+    ajouterSeance(docs, "annul", seance("2026-10-21T18:00", 30, { statut: "annulee" }));
+    ajouterSeance(docs, "ceSoir", seance("2026-10-24T18:00", 25));                           // plus tard aujourd'hui
+    ajouterSeance(docs, "futur", seance("2026-10-27T18:00", 25));
+    return docs;
+  };
+
+  test("liste : passées non faites ou non payées, impayés des mois précédents, sans annulées ni futures", () => {
+    const docs = build();
+    const arr = arrieres([{ id: "2026-09", data: docs["2026-09"] }], "2026-10", [ETU]).liste;
+    const l = seancesATraiter(docs["2026-10"], "2026-10", arr, ETU, "2026-10-24T14:00");
+    assert.deepEqual(l.map((s) => [s.id, s.mois]), [["sept", "2026-09"], ["aConf", "2026-10"], ["nonPaye", "2026-10"]]);
+    // Le soir venu, la séance de 18h entre dans la liste.
+    assert.deepEqual(seancesATraiter(docs["2026-10"], "2026-10", arr, ETU, "2026-10-24T19:00").map((s) => s.id),
+      ["sept", "aConf", "nonPaye", "ceSoir"]);
+    assert.deepEqual(seancesATraiter(empty(), "2026-10", [], ETU, "2026-10-24T19:00"), []);
+  });
+
+  test("payer en un geste : une séance prévue passe aussi à faite ; reste dû et encaissé à jour", () => {
+    const docs = build();
+    const ch = payerEtFaire(docs, "2026-10", "aConf", "virement", "2026-10-24");
+    const s = docs["2026-10"].seances.aConf;
+    assert.equal(s.statut, "faite");
+    assert.deepEqual(s.paiement, { mode: "virement", date: "2026-10-24" });
+    assert.equal(docs["2026-10"].paiementsSeances.aConf.prix, 25);
+    assert.deepEqual(Object.keys(ch), ["2026-10"]);
+    // Séance déjà faite : seul le paiement change.
+    payerEtFaire(docs, "2026-10", "nonPaye", "especes", "2026-10-24");
+    assert.equal(docs["2026-10"].seances.nonPaye.statut, "faite");
+    assert.equal(docs["2026-10"].values[ETU].receivedCash, 55);
+    // Impayé de septembre payé aujourd'hui : compté en octobre.
+    const ch2 = payerEtFaire(docs, "2026-09", "sept", "virement", "2026-10-24");
+    assert.deepEqual(Object.keys(ch2).sort(), ["2026-09", "2026-10"]);
+    assert.equal(docs["2026-10"].paiementsSeances.sept.seanceMois, "2026-09");
+    assert.throws(() => payerEtFaire(docs, "2026-10", "fini", "virement", "2026-10-24"), /déjà payée/);
+  });
+
+  test("tout marquer fait : seulement les séances encore prévues", () => {
+    const docs = build();
+    const cibles = [{ id: "aConf", mois: "2026-10" }, { id: "nonPaye", mois: "2026-10" }, { id: "sept", mois: "2026-09" }];
+    assert.deepEqual(monthsNeeded("faites", { seances: cibles }).sort(), ["2026-09", "2026-10"]);
+    const ch = marquerFaites(docs, cibles);
+    assert.equal(docs["2026-10"].seances.aConf.statut, "faite");
+    assert.deepEqual(Object.keys(ch), ["2026-10"]);
+    assert.deepEqual(marquerFaites(docs, cibles), {});
   });
 });
