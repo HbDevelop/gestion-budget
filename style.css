@@ -1966,7 +1966,10 @@ body {
 .mat-form-grid .mat-f-nom { grid-column: 1 / -1; }
 .mat-form-grid input, .mat-form-grid select { width: 100%; padding: 7px 9px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; background: #fff; }
 .mat-form > .btn { align-self: flex-start; }
-.calc-mat { display: inline-block; padding: 6px 8px; border-radius: 6px; background: var(--mat-soft, #fff7ed); color: #9a3412; cursor: help; }
+/* Prévisions : mois avec des achats de matériel (même gabarit que .calc-box des séances) */
+.calc-box-mat { border-color: #fdba74; background: #fff7ed; color: #9a3412; }
+.calc-box-mat:hover, .calc-box-mat:focus { border-color: #f97316; background: #ffedd5; box-shadow: 0 0 0 3px rgba(251, 146, 60, 0.22); }
+.calc-box-mat .calc-tip b { color: #fed7aa; }
 
 /* Onglet Matériel */
 .mat-empty { margin: 0; padding: 12px 14px; border-radius: 10px; background: var(--mat-soft, #fff7ed); font-size: 13px; }
