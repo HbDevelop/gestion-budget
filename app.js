@@ -7,7 +7,7 @@ import {
   getFirestore, doc, getDoc as fbGetDoc, setDoc as fbSetDoc, updateDoc as fbUpdateDoc, deleteField,
   collection, getDocs as fbGetDocs, query, orderBy
 } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
-import { isDemoEmail, createDemoStore, DEMO_LABELS } from "./demo.js?v=16";
+import { isDemoEmail, createDemoStore, DEMO_LABELS } from "./demo.js?v=17";
 import {
   monthId, addMonths, isActiveAt, inScope, isShared, receivedOf, cashOf, virementOf,
   withIncomeAmount, sumBankBalances, bankFor, cashFor, computeTotals, cloneForNewMonth,
@@ -128,7 +128,7 @@ const DEFAULT_CATALOG = () => ({
     { id: uid(), label: "Vacances", type: "occasionnelles", retiredAt: null },
     { id: uid(), label: "Amendes", type: "occasionnelles", retiredAt: null },
     { id: uid(), label: "Épargne", type: "capital", retiredAt: null, role: "epargne" },
-    { id: uid(), label: "Investissement", type: "capital", retiredAt: null, role: "investissement" }
+    { id: uid(), label: "Investissement financier", type: "capital", retiredAt: null, role: "investissement" }
   ].map((it) => ({ owner: FALLBACK_OWNER, ...it }))
 });
 
@@ -263,6 +263,7 @@ const suiviFamille = $("#suivi-famille");
 const analyseFamilleCards = document.querySelectorAll(".famille-only");
 const forecastEditToggle = $("#forecast-edit-toggle");
 const navEtudes = $("#nav-etudes");
+const navMateriel = $("#nav-materiel");
 
 // ---- Sélecteur d'espace ----
 const SCOPE_TABS = [{ key: "famille", label: "Famille" }, ...SPACES.map((s) => ({ key: s.key, label: s.label }))];
@@ -298,7 +299,7 @@ function setScope(scope) {
     b.setAttribute("aria-selected", on ? "true" : "false");
   });
   scopeHint.textContent = scopeHintText(scope);
-  if (updateEtudesTab()) return;
+  if (updateTabs()) return;
   rerenderCurrentView();
 }
 
@@ -308,6 +309,7 @@ function rerenderCurrentView() {
   else if (currentView === "previsions") renderForecast();
   else if (currentView === "analyse") renderAnalyse();
   else if (currentView === "etudes") renderEtudesView();
+  else if (currentView === "materiel") renderMaterielView();
 }
 
 // ---- Onglet Études (etudes.js) ----
@@ -317,12 +319,15 @@ function etudesItems(scope) {
   return catalog.items.filter((it) => isSeancesItem(it) && it.owner === scope);
 }
 
-// Affiche ou masque l'onglet ; s'il disparaît alors qu'il est ouvert, retour au Suivi
-// (renvoie true dans ce cas : la vue est déjà redessinée).
-function updateEtudesTab() {
-  const on = etudesItems(currentScope).length > 0;
-  navEtudes.classList.toggle("hidden", !on);
-  if (!on && currentView === "etudes") { switchView("suivi"); return true; }
+// Onglets propres à une personne (Études, Matériel) : affichés seulement si elle a le poste
+// concerné ; si l'onglet ouvert disparaît, retour au Suivi (renvoie true dans ce cas : la vue
+// est déjà redessinée).
+function updateTabs() {
+  const etudes = etudesItems(currentScope).length > 0;
+  const materiel = currentScope !== "famille" && !!posteMateriel(currentScope);
+  navEtudes.classList.toggle("hidden", !etudes);
+  navMateriel.classList.toggle("hidden", !materiel);
+  if ((!etudes && currentView === "etudes") || (!materiel && currentView === "materiel")) { switchView("suivi"); return true; }
   return false;
 }
 
@@ -394,7 +399,7 @@ onAuthStateChanged(auth, async (user) => {
 
   appShell.classList.remove("hidden");
   buildScopeSwitch();
-  updateEtudesTab();
+  updateTabs();
   await loadMonth(currentMonthId);
 });
 
@@ -432,6 +437,7 @@ async function switchView(view) {
   if (view === "previsions") await renderForecast();
   if (view === "analyse") await renderAnalyse();
   if (view === "etudes") await renderEtudesView();
+  if (view === "materiel") await renderMaterielView();
 }
 
 // ---- Firestore : catalogue de postes ----
@@ -483,7 +489,7 @@ async function persistScopeSetting(owner, key, value) {
 
 async function persistCatalog(cat) {
   await setDoc(doc(db, "meta", "catalog"), cat);
-  updateEtudesTab();
+  updateTabs();
 }
 
 // Migration douce : tout poste sans `owner` (ou avec un owner inconnu, ex. ancien "commun")
@@ -1566,9 +1572,10 @@ function buildSuiviRow(item) {
   `;
   const amountInput = div.querySelector(".amount-input");
   const paidCheck = div.querySelector(".paid-check");
-  if (item.role === "materiel") {
+  // Mois avec des achats de matériel : montant calculé à partir des achats (onglet Matériel).
+  if (v0.materiel) {
     amountInput.readOnly = true;
-    amountInput.title = "Calculé à partir des achats : Analyse → Investissement matériel";
+    amountInput.title = "Calculé à partir des achats : onglet Matériel";
   }
   amountInput.addEventListener("input", () => {
     const c = current();
@@ -2007,9 +2014,10 @@ function gridRow(item, ids, monthsByI, opts) {
       // Mois avec des séances : montant calculé, modifiable seulement via les séances (Suivi).
       // Même gabarit que les champs voisins, avec une étiquette au survol / au toucher.
       row += `<td>${calcBox(item, data, amount, i >= ids.length - 2)}</td>`;
-    } else if (opts.editable && item.role === "materiel") {
-      // Calculé à partir des achats (Analyse → Investissement matériel).
-      row += `<td><span class="calc-mat" title="Calculé à partir des achats : Analyse → Investissement matériel">${euros(amount)}</span></td>`;
+    } else if (opts.editable && v && v.materiel) {
+      // Mois avec des achats de matériel : calculé à partir des achats (onglet Matériel) ; les
+      // autres mois restent une prévision saisie à la main.
+      row += `<td><span class="calc-mat" title="Calculé à partir des achats : onglet Matériel">${euros(amount)}</span></td>`;
     } else if (opts.editable) {
       row += `<td><input class="forecast-input" type="number" step="0.01" value="${amount}"
         data-month-id-attr="${id}" data-item-id="${item.id}" /></td>`;
@@ -2535,9 +2543,9 @@ function renderObjectif(box, scope, series, monthsById, curId, niveauActuel) {
 const CAP_DEFAULT = 100000;
 const CAP_HORIZON_MOIS = 600;
 const CAP_BASES = [
-  { key: "total", label: "Épargne + invest." },
+  { key: "total", label: "Épargne + invest. financier" },
   { key: "epargne", label: "Épargne" },
-  { key: "investissement", label: "Investissement" },
+  { key: "investissement", label: "Investissement financier" },
   // Proposé seulement si un PEE / PER entreprise est renseigné pour l'espace affiché.
   { key: "tout", label: "Tout, avec PEE / PER" },
   // Proposé seulement s'il y a du matériel (valeur estimée, pas le prix payé).
@@ -3097,20 +3105,31 @@ function planCard(p, plans, curId) {
 // matériel » du budget (Épargne & Investissement) est calculé à partir des achats du mois.
 const MATERIEL_COULEUR = "#c2410c";
 
+// Poste « Investissement matériel » d'une personne : celui qui a le rôle `materiel`, sinon un
+// poste d'Épargne & Investissement sans rôle dont le nom parle de matériel (créé à la main dans
+// Prévisions) — il reçoit le rôle au premier achat enregistré.
 function posteMateriel(owner) {
-  return catalog.items.find((it) => it.role === "materiel" && it.owner === owner && !it.retiredAt) || null;
+  if (!catalog) return null;
+  const actifs = catalog.items.filter((it) => it.owner === owner && !it.retiredAt);
+  return actifs.find((it) => it.role === "materiel") ||
+    actifs.find((it) => it.type === "capital" && !it.role && /mat[ée]riel/i.test(it.label)) || null;
 }
 
-// Met le poste du budget à jour sur les mois `mids` (mois d'achat avant / après la modification) :
-// montant = achats du mois, « payé » si tous sont déjà faits. Le poste est créé au premier achat.
+// Met le poste du budget à jour sur les mois `mids` (mois d'achat avant / après la modification).
+// Mois avec des achats : montant = achats du mois (« payé » si tous sont faits), la prévision
+// saisie à la main est mise de côté ; mois sans achat : la prévision revient. Le poste est créé
+// au premier achat s'il n'existe pas.
 async function syncMaterielBudget(owner, mids, materiel) {
   const achats = achatsDe(materiel, owner);
   const parMois = montantsParMois(achats);
   let item = posteMateriel(owner);
-  if (!item) {
-    if (!Object.keys(parMois).length) return;
-    item = { id: uid(), label: "Investissement matériel", type: "capital", owner, retiredAt: null, role: "materiel" };
-    catalog.items.push(item);
+  if (!item && !Object.keys(parMois).length) return;
+  if (!item || item.role !== "materiel") {
+    if (!item) {
+      item = { id: uid(), label: "Investissement matériel", type: "capital", owner, retiredAt: null };
+      catalog.items.push(item);
+    }
+    item.role = "materiel";
     await persistCatalog(catalog);
   }
   const today = todayStr();
@@ -3118,10 +3137,17 @@ async function syncMaterielBudget(owner, mids, materiel) {
     const data = await seanceMonthDoc(mid);
     const prev = data.values[item.id];
     const amount = parMois[mid] || 0;
-    if (!amount && !prev) continue;
-    const paid = amount > 0 && achats.filter((a) => a.date.startsWith(mid)).every((a) => a.date <= today);
-    const paths = setItemValue(data, item.id, { ...(prev || {}), amount, paid, materiel: true });
-    await saveMonthChanges(monthStore, mid, data, paths, saveMeta());
+    let next;
+    if (amount) {
+      const prevu = prev && prev.materiel ? (prev.prevuMateriel || 0) : ((prev && prev.amount) || 0);
+      const paid = achats.filter((a) => a.date.startsWith(mid)).every((a) => a.date <= today);
+      next = { ...(prev || {}), amount, paid, materiel: true, prevuMateriel: prevu };
+    } else if (prev && prev.materiel) {
+      next = { ...prev, amount: prev.prevuMateriel || 0, paid: false };
+      delete next.materiel;
+      delete next.prevuMateriel;
+    } else continue;
+    await saveMonthChanges(monthStore, mid, data, setItemValue(data, item.id, next), saveMeta());
   }
 }
 
@@ -3136,7 +3162,7 @@ async function saveMateriel(materiel, owner, mids) {
     console.error(e);
     alert("Enregistrement impossible : " + ((e && e.message) || e));
   }
-  await renderAnalyse();
+  await renderMaterielView();
 }
 
 // Revenus encaissés par le poste `revId` depuis le mois `depuis` jusqu'au mois `curId`.
@@ -3149,78 +3175,117 @@ function dateFr(d) {
   return new Date(y, m - 1, j).toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" });
 }
 
-function renderMateriel(container, scope, settings, months, curId) {
-  const materiel = { ...(settings.materiel || {}) };
-  const owners = scope === "famille" ? OWNER_KEYS : [scope];
-  const achats = achatsDe(materiel, owners);
+// ---- Onglet Matériel ----
+// Une personne (l'onglet n'existe pas en Famille) : bilan, rentabilité, valeur dans le temps,
+// inventaire des achats, et ce qui est prévu au budget pour la suite.
+async function renderMaterielView() {
+  const owner = currentScope;
+  const item = posteMateriel(owner);
+  const root = $("#materiel-root");
+  if (charts.materiel) { charts.materiel.destroy(); charts.materiel = null; }
+  if (!item) { root.innerHTML = ""; return; }
+  const settings = await fetchSettings();
+  const months = await monthsForTarif();
+  const curId = monthId(new Date());
   const today = todayStr();
-  container.innerHTML = "";
-  const card = el("section", "card mat-card");
-  card.style.setProperty("--mat", MATERIEL_COULEUR);
-  card.innerHTML = `<div class="mat-head"><span class="mat-ico" aria-hidden="true">🔊</span><div><h3>Investissement matériel</h3>` +
+  const materiel = { ...(settings.materiel || {}) };
+  const achats = achatsDe(materiel, owner);
+  $("#materiel-title").textContent = item.label;
+  root.innerHTML = "";
+  const titre = (t) => el("h3", "analyse-section-title", t);
+  const b = bilanMateriel(achats, today);
+
+  // En-tête : explication + chiffres clés.
+  const hero = el("section", "card mat-card");
+  hero.innerHTML = `<div class="mat-head"><span class="mat-ico" aria-hidden="true">🔊</span><div><h3>Bilan du matériel</h3>` +
     `<p>Matériel acheté pour une activité. Ce n'est pas de l'argent disponible : il est compté à part de l'épargne et de l'autonomie, ` +
     `et sa valeur baisse avec le temps (revente minimale atteinte au bout de sa durée de vie).</p></div></div>`;
-  container.appendChild(card);
-
   if (achats.length) {
-    const b = bilanMateriel(achats, today);
     const pct = b.investi ? Math.round((b.perte / b.investi) * 100) : 0;
-    card.insertAdjacentHTML("beforeend",
+    const prevus = achats.filter((a) => a.date > today);
+    hero.insertAdjacentHTML("beforeend",
       `<div class="mat-kpis">` +
-        `<div><small>Investi</small><b>${euros(b.investi)}</b><span>${b.gardes} objet${b.gardes > 1 ? "s" : ""}${b.vendus ? ` · ${b.vendus} vendu${b.vendus > 1 ? "s" : ""}` : ""}</span></div>` +
+        `<div><small>Investi</small><b>${euros(b.investi)}</b><span>${b.gardes} objet${b.gardes > 1 ? "s" : ""}${b.vendus ? ` · ${b.vendus} vendu${b.vendus > 1 ? "s" : ""}` : ""}` +
+          `${prevus.length ? ` · ${prevus.length} achat${prevus.length > 1 ? "s" : ""} prévu${prevus.length > 1 ? "s" : ""}` : ""}</span></div>` +
         `<div class="mat-kpi-main"><small>Valeur estimée aujourd'hui</small><b>${euros(b.valeur)}</b><span>ce qu'il vaudrait à la revente</span></div>` +
         `<div><small>Perte de valeur</small><b class="negative">${b.perte > 0 ? "−" : ""}${euros(Math.abs(b.perte))}</b><span>${pct} % du prix payé</span></div>` +
         (b.recupere ? `<div><small>Récupéré (ventes)</small><b>${euros(b.recupere)}</b><span>à saisir aussi en revenu du mois</span></div>` : "") +
       `</div>`);
+  } else {
+    hero.insertAdjacentHTML("beforeend", `<p class="mat-empty">Aucun achat enregistré pour l'instant : ajoute le premier ci-dessous (sono, micros…).</p>`);
+  }
+  root.appendChild(hero);
 
-    // Rentabilité : revenus encaissés par l'activité depuis le premier achat (une personne).
-    if (owners.length === 1) {
-      const owner = owners[0];
-      const sc = (settings.byScope && settings.byScope[owner]) || {};
-      const revenus = catalog.items.filter((it) => it.type === "income" && it.owner === owner && it.role !== "epargne_out" && !it.retiredAt);
-      const revId = revenus.some((it) => it.id === sc.materielRevenu) ? sc.materielRevenu : "";
-      const rent = el("div", "mat-rent");
-      let html = `<label class="mat-rent-pick">Activité qui utilise ce matériel <select><option value="">— choisir un revenu —</option>` +
-        revenus.map((it) => `<option value="${escapeAttr(it.id)}"${it.id === revId ? " selected" : ""}>${escapeHtml(it.label)}</option>`).join("") + `</select></label>`;
-      if (revId && b.investi) {
-        const depuis = achats[0].date.slice(0, 7);
-        const total = revenusDepuis(months, revId, depuis, curId);
-        const ratio = total / b.investi;
-        html += `<div class="mat-rent-bar"><i style="width:${Math.min(100, ratio * 100)}%"></i></div>` +
-          `<p>${ratio >= 1
-            ? `✓ <b>Rentabilisé</b> : ${euros(total)} encaissés depuis ${monthLabel(depuis)}, soit <b>${ratio.toLocaleString("fr-FR", { maximumFractionDigits: 1 })} fois</b> le prix du matériel.`
-            : `<b>${Math.round(ratio * 100)} %</b> du matériel remboursé par l'activité : ${euros(total)} encaissés depuis ${monthLabel(depuis)} sur ${euros(b.investi)} investis.`}</p>` +
-          `<small>Revenus encaissés (avant frais), pas le bénéfice : c'est un repère de remboursement.</small>`;
-      }
-      rent.innerHTML = html;
-      rent.querySelector("select").addEventListener("change", async (ev) => {
-        await withSaveStatus(() => persistScopeSetting(owner, "materielRevenu", ev.target.value || null));
-        await renderAnalyse();
-      });
-      card.appendChild(rent);
+  // Rentabilité : revenus encaissés par l'activité depuis le premier achat.
+  if (achats.length && b.investi) {
+    root.appendChild(titre("Rentabilité"));
+    const sc = (settings.byScope && settings.byScope[owner]) || {};
+    const revenus = catalog.items.filter((it) => it.type === "income" && it.owner === owner && it.role !== "epargne_out" && !it.retiredAt);
+    const revId = revenus.some((it) => it.id === sc.materielRevenu) ? sc.materielRevenu : "";
+    const rent = el("section", "card mat-rent");
+    let html = `<label class="mat-rent-pick">Activité qui utilise ce matériel <select><option value="">— choisir un revenu —</option>` +
+      revenus.map((it) => `<option value="${escapeAttr(it.id)}"${it.id === revId ? " selected" : ""}>${escapeHtml(it.label)}</option>`).join("") + `</select></label>`;
+    if (revId) {
+      const depuis = achats[0].date.slice(0, 7);
+      const total = revenusDepuis(months, revId, depuis, curId);
+      const ratio = total / b.investi;
+      html += `<div class="mat-rent-bar"><i style="width:${Math.min(100, ratio * 100)}%"></i></div>` +
+        `<p>${ratio >= 1
+          ? `✓ <b>Rentabilisé</b> : ${euros(total)} encaissés depuis ${monthLabel(depuis)}, soit <b>${ratio.toLocaleString("fr-FR", { maximumFractionDigits: 1 })} fois</b> le prix du matériel.`
+          : `<b>${Math.round(ratio * 100)} %</b> du matériel remboursé par l'activité : ${euros(total)} encaissés depuis ${monthLabel(depuis)} sur ${euros(b.investi)} investis.`}</p>` +
+        `<small>Revenus encaissés (avant frais), pas le bénéfice : c'est un repère de remboursement.</small>`;
+    } else {
+      html += `<small>Choisis le revenu de l'activité (ex. musicothérapie) pour voir quelle part du matériel elle a déjà remboursée.</small>`;
     }
+    rent.innerHTML = html;
+    rent.querySelector("select").addEventListener("change", async (ev) => {
+      await withSaveStatus(() => persistScopeSetting(owner, "materielRevenu", ev.target.value || null));
+      await renderMaterielView();
+    });
+    root.appendChild(rent);
+  }
 
-    // Courbe : valeur estimée (mois par mois) et total investi, du premier achat à un an après.
+  // Valeur dans le temps : du premier achat à un an après aujourd'hui (ou après le dernier achat).
+  if (achats.length) {
+    root.appendChild(titre("Valeur dans le temps"));
     const fin = addMonths([curId, achats[achats.length - 1].date.slice(0, 7)].sort().pop(), 12);
     const ids = [];
     for (let id = achats[0].date.slice(0, 7); id <= fin; id = addMonths(id, 1)) ids.push(id);
     const serie = serieMateriel(achats, ids);
-    const wrap = el("div", "mat-chart");
+    const card = el("section", "card chart-card mat-chart", `<h3>Valeur estimée et total investi</h3>`);
     const canvas = el("canvas");
-    wrap.appendChild(canvas);
-    card.appendChild(wrap);
+    card.appendChild(canvas);
+    root.appendChild(card);
     charts.materiel = cumulLineChart(canvas, { ids, labels: ids.map(monthLabelShort), values: serie.valeur }, "Valeur estimée", MATERIEL_COULEUR, [],
       [{ label: "Total investi", data: serie.investi, borderColor: "#9ca3af", borderDash: [5, 4], borderWidth: 1.5, pointRadius: 0, tension: 0, stepped: true }]);
-  // Traits droits : une courbe lissée creuserait la valeur juste avant un achat.
-  charts.materiel.data.datasets[0].tension = 0;
-  charts.materiel.update();
-
-    // Inventaire
-    const list = el("div", "mat-list");
-    achats.forEach((a) => list.appendChild(materielRow(a, materiel, owners.length > 1)));
-    card.appendChild(list);
+    // Traits droits : une courbe lissée creuserait la valeur juste avant un achat.
+    charts.materiel.data.datasets[0].tension = 0;
+    charts.materiel.update();
   }
-  card.appendChild(materielForm(null, materiel, owners));
+
+  // Inventaire + ajout.
+  root.appendChild(titre("Inventaire"));
+  const inv = el("section", "card mat-inv");
+  if (achats.length) {
+    const list = el("div", "mat-list");
+    achats.forEach((a) => list.appendChild(materielRow(a, materiel, false)));
+    inv.appendChild(list);
+  }
+  inv.appendChild(materielForm(null, materiel, [owner]));
+  root.appendChild(inv);
+
+  // Prévu au budget : montants saisis dans Prévisions pour les prochains mois (sans achat).
+  const prevus = months.filter(({ id, data }) => id >= curId && id <= addMonths(curId, 12) && data.values && data.values[item.id] &&
+    data.values[item.id].amount > 0 && !data.values[item.id].materiel).map(({ id, data }) => ({ id, amount: data.values[item.id].amount }));
+  root.appendChild(titre("Prévu au budget"));
+  const prev = el("section", "card mat-prevu");
+  prev.innerHTML = prevus.length
+    ? `<p>Montants prévus pour du matériel dans <b>Prévisions → ${escapeHtml(item.label)}</b>, sur les 12 prochains mois :</p>` +
+      `<ul>${prevus.map((x) => `<li><span>${capitalize(monthLabel(x.id))}</span><b>${euros(x.amount)}</b></li>`).join("")}</ul>` +
+      `<p class="mat-prevu-total">Total prévu : <b>${euros(prevus.reduce((t, x) => t + x.amount, 0))}</b></p>` +
+      `<small>Quand un achat est enregistré un mois, il remplace la prévision de ce mois (elle revient si l'achat est supprimé).</small>`
+    : `<p>Aucun montant prévu pour du matériel sur les 12 prochains mois. Tu peux en prévoir dans <b>Prévisions → ${escapeHtml(item.label)}</b>.</p>`;
+  root.appendChild(prev);
 }
 
 function materielRow(a, materiel, showOwner) {
@@ -3629,7 +3694,7 @@ async function renderAnalyse() {
   const invVerse = reserveCumulSeries(currentScope, months, settings, invOpts);
   const invRates = scopeRates(settings, currentScope, "investissementRendement");
   const withRate = invRates.some((r) => r.rate > 0);
-  charts.investment = cumulLineChart($("#chart-investment"), invSeries, withRate ? "Valeur estimée" : "Investissement cumulé", "#059669", [],
+  charts.investment = cumulLineChart($("#chart-investment"), invSeries, withRate ? "Valeur estimée" : "Investissement financier cumulé", "#059669", [],
     withRate ? [{ label: "Total versé", data: invVerse.values, borderColor: "#9ca3af", borderDash: [5, 4], borderWidth: 1.5, pointRadius: 0, tension: 0.3 }] : []);
   renderInvRendement($("#inv-rendement"), invRates, invSeries, invVerse, curId);
   const totalSeries = sumCumulSeries(epargneSeries, invSeries);
@@ -3645,7 +3710,6 @@ async function renderAnalyse() {
     patrimoine: matSeries ? sumCumulSeries(toutSeries || totalSeries, matSeries) : null
   }, curId, monthsById);
   renderPlans($("#plans-salariaux"), currentScope, settings.plans, curId);
-  renderMateriel($("#materiel"), currentScope, settings, months, curId);
 
   // Reste à vivre de chaque mois (pas cumulé) : la tendance mois après mois, avec les mois
   // en négatif mis en évidence pour repérer vite les périodes tendues. Juin 2026 est exclu :

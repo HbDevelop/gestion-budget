@@ -1967,3 +1967,13 @@ body {
 .mat-form-grid input, .mat-form-grid select { width: 100%; padding: 7px 9px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; background: #fff; }
 .mat-form > .btn { align-self: flex-start; }
 .calc-mat { display: inline-block; padding: 6px 8px; border-radius: 6px; background: var(--mat-soft, #fff7ed); color: #9a3412; cursor: help; }
+
+/* Onglet Matériel */
+.mat-empty { margin: 0; padding: 12px 14px; border-radius: 10px; background: var(--mat-soft, #fff7ed); font-size: 13px; }
+.etudes .mat-rent { margin-bottom: 0; }
+.mat-inv .mat-list { margin-bottom: 14px; }
+.mat-prevu p { margin: 0 0 10px; font-size: 13px; }
+.mat-prevu ul { list-style: none; margin: 0 0 10px; padding: 0; display: flex; flex-direction: column; gap: 6px; }
+.mat-prevu li { display: flex; justify-content: space-between; gap: 12px; padding: 8px 12px; border-radius: 8px; background: #fafafa; border: 1px solid var(--border); font-size: 13px; font-variant-numeric: tabular-nums; }
+.mat-prevu .mat-prevu-total { margin-top: 4px; }
+.mat-prevu small { font-size: 11.5px; color: var(--text-muted); }

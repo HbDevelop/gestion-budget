@@ -83,7 +83,7 @@ function buildDemoData(owners) {
     item("d-sport", "Sport / Club", "occasionnelles", b),
     item("d-vet-b", "Vêtements", "occasionnelles", b),
     item("d-ep-a", "Épargne", "capital", a, { role: "epargne" }),
-    item("d-inv-a", "Investissement", "capital", a, { role: "investissement" }),
+    item("d-inv-a", "Investissement financier", "capital", a, { role: "investissement" }),
     item("d-ep-b", "Épargne", "capital", b, { role: "epargne" }),
     // Matériel pour les cours (materiel.js) : montant calculé à partir des achats ci-dessous.
     item("d-mat-b", "Investissement matériel", "capital", b, { role: "materiel" })
