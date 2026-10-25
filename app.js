@@ -1249,6 +1249,9 @@ function programmationForm(item) {
   return box;
 }
 
+// Corbeille (contour), même trait que les icônes de mode de paiement.
+const TRASH_ICON = `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4h11M6.5 4V2.5h3V4M4 4l.7 9.1a1 1 0 0 0 1 .9h4.6a1 1 0 0 0 1-.9L12 4M6.75 6.5v5M9.25 6.5v5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
+
 // Élèves du poste (catalogue) : nom, tarif par séance, actif.
 function elevesEditor(item) {
   const box = el("details", "sx-eleves");
@@ -1269,7 +1272,7 @@ function elevesEditor(item) {
       `<input type="text" class="eleve-nom" value="${escapeAttr(e.nom)}" aria-label="Nom" />` +
       `<span class="sx-euro sx-tarif"><input type="number" class="eleve-tarif" step="0.01" min="0" value="${typeof e.tarif === "number" ? e.tarif : ""}" aria-label="Tarif par séance" /><i>€ / séance</i></span>` +
       `<label class="sx-switch" title="${e.actif === false ? "Inactif : n'apparaît plus dans les nouvelles séances" : "Actif"}"><input type="checkbox" ${e.actif === false ? "" : "checked"} aria-label="Actif" /><span></span></label>` +
-      `<button type="button" class="sx-eleve-del" title="Supprimer l'élève et ses séances à venir" aria-label="Supprimer ${escapeAttr(e.nom)}">🗑</button>`;
+      `<button type="button" class="sx-eleve-del" title="Supprimer l'élève et ses séances à venir" aria-label="Supprimer ${escapeAttr(e.nom)}">${TRASH_ICON}</button>`;
     const target = () => item.eleves.find((x) => x.id === e.id);
     row.querySelector(".eleve-nom").addEventListener("change", (ev) => {
       const nom = ev.target.value.trim();
