@@ -2,6 +2,8 @@
 // son démarrage. Affichage seulement (DOM + Chart.js global) : les chiffres viennent de
 // statsActivite (seances.js). Pas de Firebase ici : app.js lit les mois et appelle renderEtudes.
 
+import { prochainesVacances, vacancesDuMois, lendemain } from "./calendrier.js?v=1";
+
 const JOURS = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"];
 const COULEURS = { virement: "#2563eb", especes: "#d97706", accent: "#7c3aed" };
 
@@ -62,7 +64,7 @@ export function renderEtudes(root, stats, { label = "Études", maintenant } = {}
     titre("Élèves"),
     elevesCard(stats),
     titre("Rythme et séances à venir"),
-    grille(rythme(stats), aVenir(stats))
+    grille(rythme(stats), aVenir(stats, maintenant))
   );
 }
 
@@ -278,12 +280,20 @@ function rythme(st) {
   return card;
 }
 
-// Prochaine séance, total attendu, et séances prévues par mois.
-function aVenir(st) {
+// Prochaine séance, total attendu, séances prévues par mois (avec les vacances scolaires du
+// mois), et prochaines vacances (zone C, voir calendrier.js).
+function aVenir(st, maintenant) {
   const a = st.aVenir;
   const card = el("section", "card et-avenir", `<h3>Déjà programmé</h3>`);
+  const today = (maintenant || "").slice(0, 10);
+  const vac = today && prochainesVacances(today);
+  const vacHtml = vac
+    ? `<div class="et-vac">🏖️ <span>${vac.du <= today ? "En ce moment" : "Prochaines vacances"} : <b>${esc(vac.nom)}</b>` +
+      ` du ${dateCourte(vac.du)} au ${dateCourte(vac.au)} · reprise le ${dateCourte(lendemain(vac.au))}</span></div>`
+    : "";
   if (!a.nombre) {
     card.appendChild(el("p", "et-muted", "Aucune séance programmée pour la suite."));
+    card.insertAdjacentHTML("beforeend", vacHtml);
     return card;
   }
   const max = Math.max(...a.parMois.map((m) => m.total), 1);
@@ -292,8 +302,8 @@ function aVenir(st) {
       `<span>${esc(a.prochaine.nom)} · ${euros(a.prochaine.prix)}</span></div>` +
     `<p class="et-avenir-total"><b>${plur(a.nombre, "séance prévue", "séances prévues")}</b> · ${euros(a.total, false)} attendus</p>` +
     `<ul class="et-avenir-mois">` + a.parMois.map((m) =>
-      `<li><span>${moisLong(m.id)}</span><span class="et-bar"><i style="width:${(m.total / max) * 100}%"></i></span>` +
+      `<li><span>${moisLong(m.id)}${vacancesDuMois(m.id).map((v) => ` <em class="et-vac-tag" title="${esc(v.nom)}">🏖️ ${esc(v.court)}</em>`).join("")}</span><span class="et-bar"><i style="width:${(m.total / max) * 100}%"></i></span>` +
       `<b>${euros(m.total, false)}</b><small>${plur(m.nombre, "séance")}</small></li>`).join("") +
-    `</ul>`;
+    `</ul>` + vacHtml;
   return card;
 }

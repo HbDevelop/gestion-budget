@@ -20,7 +20,8 @@ import {
   datesRecurrentes, programmerSeances, seancesSerie, supprimerSeances, seancesFutures, seancesFuturesEleve,
   seancesATraiter, marquerFaites, statsActivite
 } from "./seances.js?v=9";
-import { renderEtudes, eleveHue } from "./etudes.js?v=1";
+import { renderEtudes, eleveHue } from "./etudes.js?v=2";
+import { infoJour, vacancesDuMois, feriesDuMois, lendemain } from "./calendrier.js?v=1";
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -758,6 +759,55 @@ function seanceDateLabel(date) {
   return `${jour} ${t || ""}`.trim();
 }
 
+// ---- Vacances scolaires (zone C) et jours fériés : repères du journal des séances ----
+// Données et calculs : calendrier.js. Vacances en bleu-vert, jours fériés en rose.
+function jourCourt(d) {
+  const [y, m, j] = d.split("-").map(Number);
+  return new Date(y, m - 1, j).toLocaleDateString("fr-FR", { weekday: "short", day: "numeric", month: "short" });
+}
+
+// Pastilles d'un jour de séance (vacances, férié), ou "" pour un jour d'école ordinaire.
+function jourChips(date) {
+  const info = infoJour(date);
+  if (!info) return "";
+  return (info.vacances ? `<span class="chip chip-vac" title="${escapeAttr(info.vacances.nom)} (zone C)">🏖️ ${escapeHtml(info.vacances.court)}</span>` : "") +
+    (info.ferie ? `<span class="chip chip-ferie" title="Jour férié">📌 ${escapeHtml(info.ferie)}</span>` : "");
+}
+
+// Bandeau d'un mois : vacances (avec la reprise) et jours fériés qui le touchent, ou null.
+function vacancesBandeau(mid) {
+  const vac = vacancesDuMois(mid);
+  const fer = feriesDuMois(mid);
+  if (!vac.length && !fer.length) return null;
+  return el("div", "sx-cal-band",
+    vac.map((v) => `<span class="band-vac">🏖️ <b>${escapeHtml(v.nom)}</b> du ${jourCourt(v.du)} au ${jourCourt(v.au)} · reprise le ${jourCourt(lendemain(v.au))}</span>`).join("") +
+    (fer.length ? `<span class="band-ferie">📌 Férié${fer.length > 1 ? "s" : ""} : ${fer.map((f) => `${jourCourt(f.jour)} (${escapeHtml(f.nom)})`).join(", ")}</span>` : ""));
+}
+
+// Mini-calendrier du mois : vacances, jours fériés, aujourd'hui, et une pastille par séance.
+function calendrierMois(mid, seances) {
+  const [y, m] = mid.split("-").map(Number);
+  const parJour = {};
+  seances.forEach((s) => { (parJour[s.date.slice(0, 10)] = parJour[s.date.slice(0, 10)] || []).push(s); });
+  const today = todayStr();
+  let html = ["L", "M", "M", "J", "V", "S", "D"].map((l) => `<span class="cal-h">${l}</span>`).join("");
+  html += "<span></span>".repeat((new Date(y, m - 1, 1).getDay() + 6) % 7);
+  for (let j = 1; j <= daysInMonth(mid); j++) {
+    const d = `${mid}-${String(j).padStart(2, "0")}`;
+    const info = infoJour(d);
+    const ss = parJour[d] || [];
+    const cls = ["cal-d", info && info.vacances && "is-vac", info && info.ferie && "is-ferie", d === today && "is-today"].filter(Boolean).join(" ");
+    const title = [jourCourt(d), info && info.vacances && info.vacances.nom, info && info.ferie && `Férié : ${info.ferie}`,
+      ss.length && `${ss.length} séance${ss.length > 1 ? "s" : ""}`].filter(Boolean).join(" · ");
+    html += `<span class="${cls}" title="${escapeAttr(title)}"><b>${j}</b>` +
+      (ss.length ? `<span class="cal-dots">${ss.map((s) => `<i class="cal-dot dot-${s.statut}"></i>`).join("")}</span>` : "") + `</span>`;
+  }
+  return el("div", "sx-cal",
+    `<div class="sx-cal-grid">${html}</div>` +
+    `<div class="sx-cal-legend"><span><i class="lg lg-vac"></i>Vacances scolaires</span><span><i class="lg lg-ferie"></i>Férié</span>` +
+    `<span><i class="cal-dot dot-faite"></i>Faite</span><span><i class="cal-dot dot-prevue"></i>Prévue</span><span><i class="cal-dot dot-annulee"></i>Annulée</span></div>`);
+}
+
 function shortDate(d) {
   const [, m, j] = d.split("-");
   return `${j}/${m}`;
@@ -873,6 +923,9 @@ function buildSeancesBlock(item) {
   const resume = [[nb("faite"), "faite"], [nb("prevue"), "prévue"], [nb("annulee"), "annulée"]]
     .filter(([n]) => n).map(([n, l]) => `${n} ${l}${n > 1 ? "s" : ""}`).join(" · ");
   panel.appendChild(el("div", "sx-section", `<h4>Séances ${/^[aeiouyéè]/.test(mois) ? "d'" : "de "}${mois}</h4><span>${resume}</span>`));
+  panel.appendChild(calendrierMois(currentMonthId, seances));
+  const bandeau = vacancesBandeau(currentMonthId);
+  if (bandeau) panel.appendChild(bandeau);
   const list = el("div", "sx-list");
   if (!seances.length) list.appendChild(el("p", "sx-empty", "Aucune séance enregistrée ce mois-ci. Ajoute la première ci-dessous."));
   seances.forEach((s) => list.appendChild(seanceRow(item, s, currentMonthId, "courant")));
@@ -899,7 +952,9 @@ function seanceRow(item, s, mois, mode = "courant") {
   const arriere = mode === "arriere";
   const passee = s.date.slice(0, 10) <= todayStr();
   const etat = s.statut === "annulee" ? "annulee" : s.statut === "faite" ? "faite" : passee ? "confirmer" : "prevue";
-  const card = el("div", `sx-card sx-${etat}${s.paiement ? " sx-payee" : ""}`);
+  const info = infoJour(s.date);
+  const card = el("div", `sx-card sx-${etat}${s.paiement ? " sx-payee" : ""}` +
+    `${info && info.vacances ? " sx-vac" : ""}${info && info.ferie ? " sx-ferie" : ""}`);
   const [d, t] = s.date.split("T");
   const [y, m, j] = d.split("-").map(Number);
   const jour = new Date(y, m - 1, j).toLocaleDateString("fr-FR", { weekday: "short" });
@@ -920,7 +975,7 @@ function seanceRow(item, s, mois, mode = "courant") {
     <div class="sx-body">
       <div class="sx-line">${eleveAvatar(item, s.eleveId)}<span class="sx-name">${escapeHtml(eleveNom(item, s.eleveId))}</span>` +
       `<span class="sx-price">${euros(s.prix)}</span></div>
-      <div class="sx-chips">${chip}${paye}${s.serieId ? `<span class="chip chip-serie" title="Séance programmée automatiquement">🔁</span>` : ""}</div>
+      <div class="sx-chips">${chip}${paye}${s.serieId ? `<span class="chip chip-serie" title="Séance programmée automatiquement">🔁</span>` : ""}${jourChips(s.date)}</div>
     </div>`;
   const body = card.querySelector(".sx-body");
   const actions = el("div", "sx-actions");
@@ -1125,6 +1180,8 @@ function futuresSection(item, futures) {
     const n = liste.filter((s) => s.statut !== "annulee");
     box.appendChild(el("div", "sx-section sx-futur-mois",
       `<h4>${capitalize(monthLabel(mid))}</h4><span>${n.length} séance${n.length > 1 ? "s" : ""} · ${euros(n.reduce((t, s) => t + (s.prix || 0), 0))}</span>`));
+    const bandeau = vacancesBandeau(mid);
+    if (bandeau) box.appendChild(bandeau);
     const list = el("div", "sx-list");
     liste.forEach((s) => list.appendChild(seanceRow(item, s, mid, "avenir")));
     box.appendChild(list);
@@ -1152,7 +1209,13 @@ function seanceForm(item, edit) {
     (edit ? field("Statut", `<select name="statut">${[["prevue", "Prévue"], ["faite", "Faite"], ["annulee", "Annulée"]].map(([k, l]) =>
       `<option value="${k}"${edit.statut === k ? " selected" : ""}>${l}</option>`).join("")}</select>`) : "") +
     `<button type="submit" class="sx-btn sx-btn-primary">${edit ? "Enregistrer" : "Ajouter"}</button>` +
-    `</div>`;
+    `</div>` +
+    `<div class="sx-jour-hint"></div>`;
+  // Date pendant des vacances ou un jour férié : signalé sous le formulaire.
+  const hint = form.querySelector(".sx-jour-hint");
+  const majHint = () => { hint.innerHTML = form.elements.date.value ? jourChips(form.elements.date.value) : ""; };
+  form.elements.date.addEventListener("input", majHint);
+  majHint();
   // Le tarif de l'élève est proposé comme prix (modifiable).
   form.elements.eleve.addEventListener("change", () => {
     const e = (item.eleves || []).find((x) => x.id === form.elements.eleve.value);
@@ -1213,6 +1276,7 @@ function programmationForm(item) {
     field("Du", `<input type="date" name="du" required value="${debut}" />`) +
     field("Au", `<input type="date" name="au" required value="${fin}" />`) +
     `</div>` +
+    `<label class="sx-check"><input type="checkbox" name="sauter" checked /><span>Pas de séance pendant les <b>vacances scolaires</b> (zone C) ni les <b>jours fériés</b></span></label>` +
     `<div class="sx-prog-preview"></div>` +
     `<button type="submit" class="sx-btn sx-btn-primary" disabled>Programmer</button>`;
   const preview = form.querySelector(".sx-prog-preview");
@@ -1223,18 +1287,38 @@ function programmationForm(item) {
     du: form.elements.du.value,
     au: form.elements.au.value
   });
+  // Dates retenues ; celles qui tombent pendant les vacances ou un jour férié sont écartées si
+  // l'option est cochée (sinon seulement signalées dans l'aperçu).
+  const datesProg = () => {
+    const toutes = datesRecurrentes(params());
+    const speciales = toutes.filter((d) => infoJour(d));
+    return { dates: form.elements.sauter.checked ? toutes.filter((d) => !infoJour(d)) : toutes, speciales };
+  };
+  const resumeSpeciales = (liste) => {
+    const parNom = {};
+    liste.forEach((d) => {
+      const info = infoJour(d);
+      const nom = info.vacances ? info.vacances.court : `férié ${shortDate(d.slice(0, 10))}`;
+      parNom[nom] = (parNom[nom] || 0) + 1;
+    });
+    return Object.entries(parNom).map(([nom, n]) => `${nom} (${n})`).join(", ");
+  };
   // Aperçu : nombre de séances, première et dernière, total et répartition par mois.
   const update = () => {
     const prix = parseFloat(form.elements.prix.value);
     let dates = [];
+    let speciales = [];
     let err = null;
     try {
-      if (params().jours.length) dates = datesRecurrentes(params());
+      if (params().jours.length) ({ dates, speciales } = datesProg());
     } catch (e) { err = e.message; }
     submit.disabled = !!err || !dates.length || !form.elements.eleve.value || !(prix >= 0);
     if (err) { preview.innerHTML = `<span class="sx-prog-err">${escapeHtml(err)}</span>`; return; }
     if (!params().jours.length) { preview.innerHTML = `<span class="sx-prog-hint">Choisis un ou plusieurs jours de la semaine.</span>`; return; }
-    if (!dates.length) { preview.innerHTML = `<span class="sx-prog-hint">Aucune date dans cette période.</span>`; return; }
+    if (!dates.length) {
+      preview.innerHTML = `<span class="sx-prog-hint">${speciales.length ? "Toutes les dates tombent pendant les vacances ou un jour férié." : "Aucune date dans cette période."}</span>`;
+      return;
+    }
     const parMois = {};
     dates.forEach((d) => { const mid = monthOfDate(d); parMois[mid] = (parMois[mid] || 0) + 1; });
     const repartition = Object.entries(parMois).map(([mid, n]) => `${n} en ${monthLabel(mid).toLowerCase()}`).join(" · ");
@@ -1242,7 +1326,10 @@ function programmationForm(item) {
       `<b>${dates.length} séance${dates.length > 1 ? "s" : ""}</b> · ${seanceDateLabel(dates[0])}` +
       (dates.length > 1 ? ` → ${seanceDateLabel(dates[dates.length - 1])}` : "") +
       (prix >= 0 ? ` · <b>${euros(prix * dates.length)}</b>` : "") +
-      `<small>${repartition}</small>`;
+      `<small>${repartition}</small>` +
+      (speciales.length ? `<small class="sx-prog-vac">🏖️ ${speciales.length} date${speciales.length > 1 ? "s" : ""} ` +
+        (form.elements.sauter.checked ? `écartée${speciales.length > 1 ? "s" : ""}` : `pendant les vacances ou un férié, gardée${speciales.length > 1 ? "s" : ""}`) +
+        ` : ${resumeSpeciales(speciales)}</small>` : "");
     submit.textContent = `Programmer ${dates.length} séance${dates.length > 1 ? "s" : ""}`;
   };
   form.elements.eleve.addEventListener("change", () => {
@@ -1255,7 +1342,8 @@ function programmationForm(item) {
   form.addEventListener("submit", (ev) => {
     ev.preventDefault();
     let dates;
-    try { dates = datesRecurrentes(params()); } catch (e) { alert(e.message); return; }
+    try { ({ dates } = datesProg()); } catch (e) { alert(e.message); return; }
+    if (!dates.length) return;
     const base = { itemId: item.id, eleveId: form.elements.eleve.value, prix: parseFloat(form.elements.prix.value), serieId: uid() };
     const nom = eleveNom(item, base.eleveId);
     runSeanceOp("programmer", { dates }, (docs) => {
