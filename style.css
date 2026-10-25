@@ -1980,3 +1980,45 @@ body {
 .mat-prevu li { display: flex; justify-content: space-between; gap: 12px; padding: 8px 12px; border-radius: 8px; background: #fafafa; border: 1px solid var(--border); font-size: 13px; font-variant-numeric: tabular-nums; }
 .mat-prevu .mat-prevu-total { margin-top: 4px; }
 .mat-prevu small { font-size: 11.5px; color: var(--text-muted); }
+
+/* Onglet Matériel : saisie en premier, bandeau compact, analyse dépliable */
+.mat-toolbar { display: flex; justify-content: flex-end; margin: -6px 0 12px; }
+.mat-add-btn { font-size: 15px; padding: 10px 18px; border-radius: 10px; box-shadow: 0 2px 8px rgba(37, 99, 235, 0.25); }
+@media (max-width: 560px) { .mat-toolbar { margin-top: 0; } .mat-add-btn { width: 100%; } }
+.mat-flash { margin-bottom: 12px; }
+.mat-form-new { margin-bottom: 16px; padding: 16px; background: #fff; border: 2px solid #fdba74; border-style: solid; box-shadow: 0 6px 20px rgba(194, 65, 12, 0.12); }
+.mat-form-new .mat-form-title { font-size: 15px; }
+.mat-form-new .mat-form-grid { grid-template-columns: minmax(0, 2fr) minmax(0, 1fr) minmax(0, 1fr); }
+.mat-form-new .mat-form-grid .mat-f-nom { grid-column: auto; }
+@media (max-width: 560px) {
+  .mat-form-new .mat-form-grid { grid-template-columns: 1fr 1fr; }
+  .mat-form-new .mat-form-grid .mat-f-nom { grid-column: 1 / -1; }
+}
+.mat-options summary { cursor: pointer; font-size: 12.5px; font-weight: 600; color: var(--mat, #c2410c); }
+.mat-options summary small { margin-left: 6px; font-weight: 400; color: var(--text-muted); }
+.mat-options .mat-form-grid { margin-top: 8px; }
+.mat-form-actions { display: flex; justify-content: flex-end; gap: 8px; }
+.mat-form > .mat-form-actions .btn { padding: 8px 16px; }
+.mat-strip { display: flex; flex-wrap: wrap; gap: 6px 22px; padding: 12px 16px; border-top: 4px solid var(--mat, #c2410c); }
+.mat-stat { display: flex; flex-direction: column; gap: 1px; }
+.mat-stat small { font-size: 11px; color: var(--text-muted); }
+.mat-stat b { font-size: 16px; font-variant-numeric: tabular-nums; }
+.mat-stat b span { font-size: 12px; font-weight: 500; color: var(--text-muted); }
+.mat-stat-main b { color: var(--mat, #c2410c); }
+.mat-stat-neg b { color: var(--danger); }
+.mat-stat-ok b { color: var(--success); }
+.mat-count { font-size: 12px; font-weight: 500; color: var(--text-muted); }
+.mat-inv { padding: 0; overflow: hidden; }
+.mat-inv .mat-list { margin: 0; border: none; border-radius: 0; }
+.mat-inv .mat-empty { margin: 14px; }
+.mat-analyse { margin-top: 28px; padding: 0; }
+.mat-analyse summary { display: flex; align-items: center; justify-content: space-between; padding: 14px 16px; cursor: pointer; font-weight: 700; font-size: 14px; list-style: none; }
+.mat-analyse summary::-webkit-details-marker { display: none; }
+.mat-analyse[open] summary { border-bottom: 1px solid var(--border); }
+.mat-analyse[open] summary .sx-chev { transform: rotate(180deg); }
+.mat-analyse .mat-rent { margin: 14px 16px; }
+.mat-analyse .mat-chart { padding: 0 16px 16px; }
+.mat-analyse .mat-chart h4 { margin: 0 0 8px; font-size: 13px; }
+/* Suivi : raccourci « ＋ achat » sur la ligne du poste matériel */
+.mat-shortcut { margin-left: 8px; padding: 2px 8px; border: 1px solid #fdba74; border-radius: 99px; background: #fff7ed; color: #9a3412; font-size: 11.5px; font-weight: 600; cursor: pointer; vertical-align: middle; }
+.mat-shortcut:hover { background: #ffedd5; }
