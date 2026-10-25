@@ -1907,3 +1907,63 @@ body {
 .sx-ecart p { margin: 0; }
 .sx-ecart p + p { margin-top: 3px; }
 .sx-ecart-ico { flex: none; }
+
+/* ---- Investissement matériel (onglet Analyse, materiel.js) ---- */
+.mat-card { --mat: #c2410c; --mat-soft: #fff7ed; border-top: 4px solid var(--mat); }
+.mat-head { display: flex; gap: 12px; align-items: flex-start; margin-bottom: 14px; }
+.mat-head h3 { margin: 0 0 4px; font-size: 15px; }
+.mat-head p { margin: 0; font-size: 12.5px; color: var(--text-muted); line-height: 1.45; }
+.mat-ico { flex: none; display: grid; place-items: center; width: 40px; height: 40px; border-radius: 12px; background: var(--mat-soft); font-size: 20px; }
+.mat-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; margin-bottom: 14px; }
+.mat-kpis > div { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: 10px; background: #fafafa; border: 1px solid var(--border); }
+.mat-kpis small { font-size: 11.5px; color: var(--text-muted); }
+.mat-kpis b { font-size: 18px; font-variant-numeric: tabular-nums; }
+.mat-kpis span { font-size: 11.5px; color: var(--text-muted); }
+.mat-kpis .mat-kpi-main { background: var(--mat-soft); border-color: #fed7aa; }
+.mat-kpis .mat-kpi-main b { color: var(--mat); font-size: 20px; }
+.mat-kpis b.negative { color: var(--danger); }
+
+.mat-rent { display: flex; flex-direction: column; gap: 6px; margin-bottom: 14px; padding: 12px; border-radius: 10px; background: #f0fdf4; border: 1px solid #bbf7d0; }
+.mat-rent-pick { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; }
+.mat-rent-pick select { padding: 5px 8px; border: 1px solid var(--border); border-radius: 8px; background: #fff; font-size: 13px; }
+.mat-rent p { margin: 0; font-size: 13px; }
+.mat-rent small { font-size: 11.5px; color: var(--text-muted); }
+.mat-rent-bar { height: 8px; border-radius: 99px; background: #dcfce7; overflow: hidden; }
+.mat-rent-bar i { display: block; height: 100%; border-radius: inherit; background: var(--success); }
+
+.mat-chart { position: relative; margin-bottom: 14px; }
+.mat-chart canvas { max-height: 260px; }
+
+.mat-list { display: flex; flex-direction: column; border: 1px solid var(--border); border-radius: 10px; overflow: hidden; margin-bottom: 14px; }
+.mat-row { display: grid; grid-template-columns: minmax(0, 1fr) 120px auto; align-items: center; gap: 12px; padding: 10px 12px; border-bottom: 1px solid #f1f2f4; background: #fff; }
+.mat-list > :last-child { border-bottom: none; }
+.mat-row-main { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 8px; min-width: 0; }
+.mat-row-main b { font-size: 14px; }
+.mat-row-main small { flex-basis: 100%; font-size: 12px; color: var(--text-muted); }
+.mat-row-val { display: flex; flex-direction: column; gap: 4px; align-items: flex-end; font-variant-numeric: tabular-nums; }
+.mat-usure { display: block; width: 100%; height: 5px; border-radius: 99px; background: #fed7aa; overflow: hidden; }
+.mat-usure i { display: block; height: 100%; background: #9a3412; opacity: 0.55; }
+.mat-row-actions { display: flex; align-items: center; gap: 4px; }
+.mat-del { display: grid; place-items: center; width: 30px; height: 30px; border: 1px solid transparent; border-radius: 8px; background: none; color: var(--text-muted); cursor: pointer; }
+.mat-del svg { width: 16px; height: 16px; }
+.mat-del:hover { color: var(--danger); background: #fef2f2; border-color: #fecaca; }
+.mat-row.is-sold { background: #fafafa; }
+.mat-row.is-sold .mat-row-main b { color: var(--text-muted); }
+.mat-chip { padding: 1px 8px; border-radius: 99px; background: #f1f5f9; color: #475569; font-size: 11px; font-weight: 600; }
+.mat-chip-prevu { background: #eff6ff; color: #1d4ed8; }
+@media (max-width: 560px) {
+  .mat-row { grid-template-columns: minmax(0, 1fr) auto; }
+  .mat-row-val { grid-column: 1; align-items: flex-start; }
+  .mat-row-val .mat-usure { width: 120px; }
+  .mat-row-actions { grid-row: 1; grid-column: 2; }
+}
+
+.mat-form { display: flex; flex-direction: column; gap: 10px; padding: 12px; border-radius: 10px; background: #fafafa; border: 1px dashed #fdba74; }
+.mat-form-edit { margin: 0; border-radius: 0; border: none; border-bottom: 1px solid #f1f2f4; background: var(--mat-soft); }
+.mat-form-title { font-size: 13px; font-weight: 700; color: var(--mat); }
+.mat-form-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(140px, 1fr)); gap: 8px; }
+.mat-form-grid label { display: flex; flex-direction: column; gap: 3px; font-size: 11.5px; color: var(--text-muted); font-weight: 600; min-width: 0; }
+.mat-form-grid .mat-f-nom { grid-column: 1 / -1; }
+.mat-form-grid input, .mat-form-grid select { width: 100%; padding: 7px 9px; border: 1px solid var(--border); border-radius: 8px; font-size: 14px; background: #fff; }
+.mat-form > .btn { align-self: flex-start; }
+.calc-mat { display: inline-block; padding: 6px 8px; border-radius: 6px; background: var(--mat-soft, #fff7ed); color: #9a3412; cursor: help; }

@@ -4,7 +4,7 @@
 // rechargement). Le compte de démo ne doit PAS figurer dans les règles Firestore : même en
 // contournant l'appli, il n'a ainsi aucun accès aux vraies données.
 
-import { ajouterSeance, payerSeance } from "./seances.js?v=11";
+import { ajouterSeance, payerSeance } from "./seances.js?v=12";
 
 // Empreinte SHA-256 de l'adresse du compte de démo (en minuscules) : l'adresse elle-même ne
 // figure pas dans ce dépôt public. Pour changer de compte de démo, remplacer cette empreinte.
@@ -84,7 +84,9 @@ function buildDemoData(owners) {
     item("d-vet-b", "Vêtements", "occasionnelles", b),
     item("d-ep-a", "Épargne", "capital", a, { role: "epargne" }),
     item("d-inv-a", "Investissement", "capital", a, { role: "investissement" }),
-    item("d-ep-b", "Épargne", "capital", b, { role: "epargne" })
+    item("d-ep-b", "Épargne", "capital", b, { role: "epargne" }),
+    // Matériel pour les cours (materiel.js) : montant calculé à partir des achats ci-dessous.
+    item("d-mat-b", "Investissement matériel", "capital", b, { role: "materiel" })
   ];
 
   const round = (v) => Math.round(v * 100) / 100;
@@ -106,7 +108,8 @@ function buildDemoData(owners) {
       "d-sante": rnd() < 0.4 ? between(20, 75) : 0,
       "d-sport": m === 9 ? 240 : 0,
       "d-vet-b": rnd() < 0.4 ? between(35, 110) : 0,
-      "d-ep-a": 450, "d-inv-a": 250, "d-ep-b": 300
+      "d-ep-a": 450, "d-inv-a": 250, "d-ep-b": 300,
+      "d-mat-b": id === addMonths(cur, -8) ? 890 : id === addMonths(cur, -3) ? 285 : 0
     };
   };
 
@@ -122,6 +125,7 @@ function buildDemoData(owners) {
       const done = id < cur || (id === cur && (income ? itemId.startsWith("d-sal") : i % 2 === 0));
       values[itemId] = income ? { amount, received: done ? amount : 0, receivedCash: 0, paid: done } : { amount, paid: done };
     });
+    if (values["d-mat-b"]) values["d-mat-b"].materiel = true;
     months[id] = { values };
     if (id <= cur) {
       months[id].bankBalances = { [a]: id === cur ? 1842.5 : between(900, 2400), [b]: id === cur ? 2215.3 : between(1200, 2800) };
@@ -139,7 +143,12 @@ function buildDemoData(owners) {
       },
       // Même mois de départ pour l'investissement (même sans versement) : sinon le total Famille
       // ne démarrerait qu'au mois de départ par défaut et ferait un saut sur la courbe.
-      [b]: { epargneBase: 5200, epargneStart: first, epargneTaux: 2.4, investissementBase: 0, investissementStart: first }
+      [b]: { epargneBase: 5200, epargneStart: first, epargneTaux: 2.4, investissementBase: 0, investissementStart: first, materielRevenu: "d-cours-b" }
+    },
+    materiel: {
+      "d-mat-sono": { owner: b, nom: "Enceinte sono 300 W", date: `${addMonths(cur, -8)}-12`, prix: 890, duree: 5, residuel: 20, estimation: null, vente: null },
+      "d-mat-micro": { owner: b, nom: "Micro HF", date: `${addMonths(cur, -3)}-04`, prix: 240, duree: 4, residuel: 15, estimation: null, vente: null },
+      "d-mat-pied": { owner: b, nom: "Pied de micro", date: `${addMonths(cur, -3)}-04`, prix: 45, duree: 8, residuel: 10, estimation: null, vente: null }
     },
     plans: {
       [`pee-${a}`]: { type: "pee", owner: a, solde: 6800, au: addMonths(cur, -2), versement: 100, abondement: 150, rendement: 4, dispo: addMonths(cur, 30) },
