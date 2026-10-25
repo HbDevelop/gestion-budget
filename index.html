@@ -6,7 +6,7 @@
   <title>Gestion Budget</title>
   <link rel="icon" type="image/svg+xml" href="favicon.svg?v=1" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2032%2032'%3E%3Crect%20width='32'%20height='32'%20rx='7'%20fill='%232563eb'/%3E%3Ctext%20x='16'%20y='16'%20font-family='Arial,sans-serif'%20font-size='22'%20font-weight='700'%20text-anchor='middle'%20dominant-baseline='central'%20fill='%23fff'%3E%E2%82%AC%3C/text%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="style.css?v=59" />
+  <link rel="stylesheet" href="style.css?v=60" />
   <script src="https://accounts.google.com/gsi/client" async defer></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 </head>
@@ -40,6 +40,8 @@
         <button data-view="analyse" class="nav-btn">Analyse</button>
         <!-- Seulement dans l'espace d'une personne qui a un revenu géré par séances -->
         <button id="nav-etudes" data-view="etudes" class="nav-btn hidden">🎓 Études</button>
+        <!-- Seulement dans l'espace d'une personne qui a un poste « Investissement matériel » -->
+        <button id="nav-materiel" data-view="materiel" class="nav-btn hidden">🔊 Matériel</button>
       </nav>
       <div class="topbar-actions">
         <span id="user-label" class="user-label"></span>
@@ -229,7 +231,7 @@
             <section id="epargne-objectif" class="card objectif-card" aria-live="polite"></section>
           </div>
           <section class="card chart-card chart-wide">
-            <h3>Évolution de l'investissement</h3>
+            <h3>Évolution de l'investissement financier</h3>
             <div id="inv-rendement" class="inv-rate"></div>
             <canvas id="chart-investment"></canvas>
           </section>
@@ -240,10 +242,6 @@
         <!-- PEE / PER entreprise : facultatifs, ajoutés et renseignés ici, par personne -->
         <h3 class="analyse-section-title">Épargne salariale</h3>
         <div id="plans-salariaux" class="plans"></div>
-
-        <!-- Matériel d'une activité (sono, micros…) : investissement non liquide, compté à part (materiel.js) -->
-        <h3 class="analyse-section-title">Investissement matériel</h3>
-        <div id="materiel"></div>
 
         <h3 class="analyse-section-title">Répartition du budget</h3>
         <div class="charts-grid">
@@ -284,6 +282,15 @@
       </main>
     </div>
 
+    <!-- Vue : investissement matériel de la personne affichée (materiel.js) -->
+    <div id="view-materiel" class="view hidden">
+      <main class="content etudes">
+        <h2 class="view-title">Matériel : <span id="materiel-title"></span></h2>
+        <p class="view-subtitle">Achats de matériel pour une activité : ce qu'il vaut aujourd'hui, ce que l'activité a déjà remboursé, et ce qui est prévu au budget.</p>
+        <div id="materiel-root"></div>
+      </main>
+    </div>
+
     <!-- Vue : activité d'études (postes à séances de la personne affichée, voir etudes.js) -->
     <div id="view-etudes" class="view hidden">
       <main class="content etudes">
@@ -294,6 +301,6 @@
     </div>
   </div>
 
-  <script type="module" src="app.js?v=88"></script>
+  <script type="module" src="app.js?v=89"></script>
 </body>
 </html>
