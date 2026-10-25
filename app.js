@@ -15,7 +15,7 @@ import {
   saveForecastValue, zeroItemInMonths
 } from "./budget-core.js?v=3";
 import {
-  isSeancesItem, hasSeances, seancesOfItem, monthOfDate, monthsNeeded, ajouterSeance, modifierSeance,
+  isSeancesItem, hasSeances, seancesOfItem, paiementsOfItem, monthOfDate, monthsNeeded, ajouterSeance, modifierSeance,
   payerSeance, annulerPaiement, supprimerSeance, arrieres, elevesOf, seancesATarifer, appliquerTarif,
   datesRecurrentes, programmerSeances, seancesSerie, supprimerSeances, seancesFutures, seancesFuturesEleve,
   seancesATraiter, marquerFaites, statsActivite, descendantsDe
@@ -856,6 +856,33 @@ async function runSeanceOp(op, args, apply) {
   return true;
 }
 
+// Le prévu d'un poste à séances = l'activité du mois (ses séances), l'encaissé = l'argent arrivé
+// ce mois-ci. Ils diffèrent quand une séance est payée un autre mois : on l'explique, pour que
+// « prévu », « encaissé » et « reste dû » se comprennent. Renvoie null s'il n'y a rien à dire.
+function ecartEncaisse(item, seances, amount) {
+  const mois = (mid) => monthLabel(mid).toLowerCase();
+  const de = (mid) => (/^[aeiouyéè]/.test(mois(mid)) ? "d'" : "de ") + mois(mid);
+  const parMois = (liste, cle) => {
+    const out = {};
+    liste.forEach((x) => { const o = out[cle(x)] || (out[cle(x)] = { n: 0, total: 0 }); o.n += 1; o.total += x.prix || 0; });
+    return Object.entries(out).sort();
+  };
+  // Argent reçu ce mois-ci pour des séances d'autres mois.
+  const recus = parMois(paiementsOfItem(monthData, item.id).filter((p) => p.seanceMois && p.seanceMois !== currentMonthId), (p) => p.seanceMois);
+  // Séances de ce mois payées un autre mois.
+  const ailleurs = parMois(seances.filter((s) => s.paiement && monthOfDate(s.paiement.date) !== currentMonthId), (s) => monthOfDate(s.paiement.date));
+  if (!recus.length && !ailleurs.length) return null;
+  const seance = (n) => `${n} séance${n > 1 ? "s" : ""}`;
+  const lignes = [
+    ...recus.map(([mid, o]) => `L'encaissé comprend <b>${euros(o.total)}</b> reçus ce mois-ci pour ${seance(o.n)} ${de(mid)}.`),
+    ...ailleurs.map(([mid, o]) => `${o.n > 1 ? `${o.n} séances de ce mois (<b>${euros(o.total)}</b>) ont été payées` : `1 séance de ce mois (<b>${euros(o.total)}</b>) a été payée`}` +
+      ` en ${mois(mid)} : ${o.n > 1 ? "elles comptent" : "elle compte"} dans l'encaissé ${de(mid)}.`)
+  ];
+  return el("div", "sx-ecart",
+    `<span class="sx-ecart-ico" aria-hidden="true">ℹ️</span><div><p>Le prévu (<b>${euros(amount)}</b>) correspond aux séances ${de(currentMonthId)} : c'est l'activité du mois.</p>` +
+    lignes.map((l) => `<p>${l}</p>`).join("") + `</div>`);
+}
+
 function buildSeancesBlock(item) {
   const v = monthData.values[item.id] || { amount: 0 };
   const seances = seancesOfItem(monthData, item.id);
@@ -896,7 +923,8 @@ function buildSeancesBlock(item) {
     (arr.length ? `<span class="sx-meta-warn">⏳ ${euros(arrTotal)} à encaisser (mois précédents)</span>` : "") +
     (aTraiter.length && !open ? `<span class="sx-meta-warn">${aTraiter.length} séance${aTraiter.length > 1 ? "s" : ""} à traiter</span>` : "") +
     `<button type="button" class="sx-link" aria-expanded="${open}">${open ? "Fermer le journal ▴" : "Journal ▸"}</button>`;
-  block.append(row, stats, bar, meta);
+  const ecart = ecartEncaisse(item, seances, amount);
+  block.append(row, stats, bar, ...(ecart ? [ecart] : []), meta);
   meta.querySelector(".sx-link").addEventListener("click", () => {
     if (open) seancesOuverts.delete(item.id); else seancesOuverts.add(item.id);
     render();
