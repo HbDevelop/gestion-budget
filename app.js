@@ -7,21 +7,22 @@ import {
   getFirestore, doc, getDoc as fbGetDoc, setDoc as fbSetDoc, updateDoc as fbUpdateDoc, deleteField,
   collection, getDocs as fbGetDocs, query, orderBy
 } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
-import { isDemoEmail, createDemoStore, DEMO_LABELS } from "./demo.js?v=15";
+import { isDemoEmail, createDemoStore, DEMO_LABELS } from "./demo.js?v=16";
 import {
   monthId, addMonths, isActiveAt, inScope, isShared, receivedOf, cashOf, virementOf,
   withIncomeAmount, sumBankBalances, bankFor, cashFor, computeTotals, cloneForNewMonth,
   setItemValue, setBankBalance, setCashBalance, createChangeSet, saveMonthChanges, createMonth,
   saveForecastValue, zeroItemInMonths
-} from "./budget-core.js?v=3";
+} from "./budget-core.js?v=4";
 import {
   isSeancesItem, hasSeances, seancesOfItem, monthOfDate, monthsNeeded, ajouterSeance, modifierSeance,
   payerSeance, annulerPaiement, supprimerSeance, arrieres, elevesOf, seancesATarifer, appliquerTarif,
   datesRecurrentes, programmerSeances, seancesSerie, supprimerSeances, seancesFutures, seancesFuturesEleve,
   seancesATraiter, marquerFaites, statsActivite, descendantsDe, ecartMois
-} from "./seances.js?v=11";
-import { renderEtudes, eleveHue } from "./etudes.js?v=4";
+} from "./seances.js?v=12";
+import { renderEtudes, eleveHue } from "./etudes.js?v=5";
 import { infoJour, vacancesDuMois, feriesDuMois, lendemain } from "./calendrier.js?v=1";
+import { MATERIEL_DEFAUT, valeurAu, achatsDe, montantsParMois, bilanMateriel, serieMateriel } from "./materiel.js?v=1";
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -57,7 +58,7 @@ const SECTIONS = [{ key: "income", label: "Revenus" }, ...GROUPS];
 // Postes de "réserve" : mouvements entre le compte courant et l'épargne / l'investissement,
 // pas des flux avec l'extérieur. On les distingue visuellement, et "Virement de l'épargne"
 // (role epargne_out) ne compte pas dans le total "Revenus" (ça pioche dans la réserve).
-const RESERVE_TAG = { epargne: "épargne", epargne_out: "reprise épargne", investissement: "invest." };
+const RESERVE_TAG = { epargne: "épargne", epargne_out: "reprise épargne", investissement: "invest.", materiel: "matériel" };
 function isReserve(item) { return !!(item && RESERVE_TAG[item.role]); }
 function reserveTagHtml(item) {
   return isReserve(item) ? ` <span class="poste-tag">${RESERVE_TAG[item.role]}</span>` : "";
@@ -217,7 +218,7 @@ const futursOuverts = new Set();
 let seancesFlash = null;
 let charts = {
   pie: null, pieAvg: null, line: null, investment: null, cap: null, balance: null, occTop: null,
-  famIncome: null, famSplit: null, famStack: null
+  famIncome: null, famSplit: null, famStack: null, materiel: null
 };
 
 // ---- DOM ----
@@ -452,6 +453,18 @@ async function persistPlans(plans) {
     await updateDoc(ref, { plans });
   } catch (e) {
     if (e && e.code === "not-found") await setDoc(ref, { plans }, { merge: true });
+    else throw e;
+  }
+}
+
+// Investissement matériel (settings.materiel) : même principe que les plans, champ remplacé en
+// entier pour qu'un achat retiré disparaisse.
+async function persistMateriel(materiel) {
+  const ref = doc(db, "meta", "settings");
+  try {
+    await updateDoc(ref, { materiel });
+  } catch (e) {
+    if (e && e.code === "not-found") await setDoc(ref, { materiel }, { merge: true });
     else throw e;
   }
 }
@@ -1553,6 +1566,10 @@ function buildSuiviRow(item) {
   `;
   const amountInput = div.querySelector(".amount-input");
   const paidCheck = div.querySelector(".paid-check");
+  if (item.role === "materiel") {
+    amountInput.readOnly = true;
+    amountInput.title = "Calculé à partir des achats : Analyse → Investissement matériel";
+  }
   amountInput.addEventListener("input", () => {
     const c = current();
     markChanged(setItemValue(monthData, item.id, { ...c, amount: parseFloat(amountInput.value) || 0 }));
@@ -1990,6 +2007,9 @@ function gridRow(item, ids, monthsByI, opts) {
       // Mois avec des séances : montant calculé, modifiable seulement via les séances (Suivi).
       // Même gabarit que les champs voisins, avec une étiquette au survol / au toucher.
       row += `<td>${calcBox(item, data, amount, i >= ids.length - 2)}</td>`;
+    } else if (opts.editable && item.role === "materiel") {
+      // Calculé à partir des achats (Analyse → Investissement matériel).
+      row += `<td><span class="calc-mat" title="Calculé à partir des achats : Analyse → Investissement matériel">${euros(amount)}</span></td>`;
     } else if (opts.editable) {
       row += `<td><input class="forecast-input" type="number" step="0.01" value="${amount}"
         data-month-id-attr="${id}" data-item-id="${item.id}" /></td>`;
@@ -2519,7 +2539,9 @@ const CAP_BASES = [
   { key: "epargne", label: "Épargne" },
   { key: "investissement", label: "Investissement" },
   // Proposé seulement si un PEE / PER entreprise est renseigné pour l'espace affiché.
-  { key: "tout", label: "Tout, avec PEE / PER" }
+  { key: "tout", label: "Tout, avec PEE / PER" },
+  // Proposé seulement s'il y a du matériel (valeur estimée, pas le prix payé).
+  { key: "patrimoine", label: "Tout, avec le matériel" }
 ];
 
 function capKey(scope) { return "budget-cap-" + scope; }
@@ -3068,6 +3090,214 @@ function planCard(p, plans, curId) {
   return card;
 }
 
+// ---- Investissement matériel (materiel.js) ----
+// Matériel acheté pour une activité (sono, micros…) : ce n'est pas de l'argent disponible, il
+// n'entre ni dans l'épargne ni dans l'autonomie. Inventaire des achats par personne, valeur qui
+// baisse avec le temps, rentabilité par rapport au revenu de l'activité. Le poste « Investissement
+// matériel » du budget (Épargne & Investissement) est calculé à partir des achats du mois.
+const MATERIEL_COULEUR = "#c2410c";
+
+function posteMateriel(owner) {
+  return catalog.items.find((it) => it.role === "materiel" && it.owner === owner && !it.retiredAt) || null;
+}
+
+// Met le poste du budget à jour sur les mois `mids` (mois d'achat avant / après la modification) :
+// montant = achats du mois, « payé » si tous sont déjà faits. Le poste est créé au premier achat.
+async function syncMaterielBudget(owner, mids, materiel) {
+  const achats = achatsDe(materiel, owner);
+  const parMois = montantsParMois(achats);
+  let item = posteMateriel(owner);
+  if (!item) {
+    if (!Object.keys(parMois).length) return;
+    item = { id: uid(), label: "Investissement matériel", type: "capital", owner, retiredAt: null, role: "materiel" };
+    catalog.items.push(item);
+    await persistCatalog(catalog);
+  }
+  const today = todayStr();
+  for (const mid of [...new Set(mids)].filter(Boolean)) {
+    const data = await seanceMonthDoc(mid);
+    const prev = data.values[item.id];
+    const amount = parMois[mid] || 0;
+    if (!amount && !prev) continue;
+    const paid = amount > 0 && achats.filter((a) => a.date.startsWith(mid)).every((a) => a.date <= today);
+    const paths = setItemValue(data, item.id, { ...(prev || {}), amount, paid, materiel: true });
+    await saveMonthChanges(monthStore, mid, data, paths, saveMeta());
+  }
+}
+
+// Enregistre l'inventaire, met le budget à jour (mois `mids`) puis redessine l'onglet.
+async function saveMateriel(materiel, owner, mids) {
+  try {
+    await withSaveStatus(async () => {
+      await persistMateriel(materiel);
+      await syncMaterielBudget(owner, mids, materiel);
+    });
+  } catch (e) {
+    console.error(e);
+    alert("Enregistrement impossible : " + ((e && e.message) || e));
+  }
+  await renderAnalyse();
+}
+
+// Revenus encaissés par le poste `revId` depuis le mois `depuis` jusqu'au mois `curId`.
+function revenusDepuis(months, revId, depuis, curId) {
+  return months.reduce((t, { id, data }) => (id >= depuis && id <= curId ? t + receivedOf(data.values && data.values[revId]) : t), 0);
+}
+
+function dateFr(d) {
+  const [y, m, j] = d.split("-").map(Number);
+  return new Date(y, m - 1, j).toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" });
+}
+
+function renderMateriel(container, scope, settings, months, curId) {
+  const materiel = { ...(settings.materiel || {}) };
+  const owners = scope === "famille" ? OWNER_KEYS : [scope];
+  const achats = achatsDe(materiel, owners);
+  const today = todayStr();
+  container.innerHTML = "";
+  const card = el("section", "card mat-card");
+  card.style.setProperty("--mat", MATERIEL_COULEUR);
+  card.innerHTML = `<div class="mat-head"><span class="mat-ico" aria-hidden="true">🔊</span><div><h3>Investissement matériel</h3>` +
+    `<p>Matériel acheté pour une activité. Ce n'est pas de l'argent disponible : il est compté à part de l'épargne et de l'autonomie, ` +
+    `et sa valeur baisse avec le temps (revente minimale atteinte au bout de sa durée de vie).</p></div></div>`;
+  container.appendChild(card);
+
+  if (achats.length) {
+    const b = bilanMateriel(achats, today);
+    const pct = b.investi ? Math.round((b.perte / b.investi) * 100) : 0;
+    card.insertAdjacentHTML("beforeend",
+      `<div class="mat-kpis">` +
+        `<div><small>Investi</small><b>${euros(b.investi)}</b><span>${b.gardes} objet${b.gardes > 1 ? "s" : ""}${b.vendus ? ` · ${b.vendus} vendu${b.vendus > 1 ? "s" : ""}` : ""}</span></div>` +
+        `<div class="mat-kpi-main"><small>Valeur estimée aujourd'hui</small><b>${euros(b.valeur)}</b><span>ce qu'il vaudrait à la revente</span></div>` +
+        `<div><small>Perte de valeur</small><b class="negative">${b.perte > 0 ? "−" : ""}${euros(Math.abs(b.perte))}</b><span>${pct} % du prix payé</span></div>` +
+        (b.recupere ? `<div><small>Récupéré (ventes)</small><b>${euros(b.recupere)}</b><span>à saisir aussi en revenu du mois</span></div>` : "") +
+      `</div>`);
+
+    // Rentabilité : revenus encaissés par l'activité depuis le premier achat (une personne).
+    if (owners.length === 1) {
+      const owner = owners[0];
+      const sc = (settings.byScope && settings.byScope[owner]) || {};
+      const revenus = catalog.items.filter((it) => it.type === "income" && it.owner === owner && it.role !== "epargne_out" && !it.retiredAt);
+      const revId = revenus.some((it) => it.id === sc.materielRevenu) ? sc.materielRevenu : "";
+      const rent = el("div", "mat-rent");
+      let html = `<label class="mat-rent-pick">Activité qui utilise ce matériel <select><option value="">— choisir un revenu —</option>` +
+        revenus.map((it) => `<option value="${escapeAttr(it.id)}"${it.id === revId ? " selected" : ""}>${escapeHtml(it.label)}</option>`).join("") + `</select></label>`;
+      if (revId && b.investi) {
+        const depuis = achats[0].date.slice(0, 7);
+        const total = revenusDepuis(months, revId, depuis, curId);
+        const ratio = total / b.investi;
+        html += `<div class="mat-rent-bar"><i style="width:${Math.min(100, ratio * 100)}%"></i></div>` +
+          `<p>${ratio >= 1
+            ? `✓ <b>Rentabilisé</b> : ${euros(total)} encaissés depuis ${monthLabel(depuis)}, soit <b>${ratio.toLocaleString("fr-FR", { maximumFractionDigits: 1 })} fois</b> le prix du matériel.`
+            : `<b>${Math.round(ratio * 100)} %</b> du matériel remboursé par l'activité : ${euros(total)} encaissés depuis ${monthLabel(depuis)} sur ${euros(b.investi)} investis.`}</p>` +
+          `<small>Revenus encaissés (avant frais), pas le bénéfice : c'est un repère de remboursement.</small>`;
+      }
+      rent.innerHTML = html;
+      rent.querySelector("select").addEventListener("change", async (ev) => {
+        await withSaveStatus(() => persistScopeSetting(owner, "materielRevenu", ev.target.value || null));
+        await renderAnalyse();
+      });
+      card.appendChild(rent);
+    }
+
+    // Courbe : valeur estimée (mois par mois) et total investi, du premier achat à un an après.
+    const fin = addMonths([curId, achats[achats.length - 1].date.slice(0, 7)].sort().pop(), 12);
+    const ids = [];
+    for (let id = achats[0].date.slice(0, 7); id <= fin; id = addMonths(id, 1)) ids.push(id);
+    const serie = serieMateriel(achats, ids);
+    const wrap = el("div", "mat-chart");
+    const canvas = el("canvas");
+    wrap.appendChild(canvas);
+    card.appendChild(wrap);
+    charts.materiel = cumulLineChart(canvas, { ids, labels: ids.map(monthLabelShort), values: serie.valeur }, "Valeur estimée", MATERIEL_COULEUR, [],
+      [{ label: "Total investi", data: serie.investi, borderColor: "#9ca3af", borderDash: [5, 4], borderWidth: 1.5, pointRadius: 0, tension: 0, stepped: true }]);
+  // Traits droits : une courbe lissée creuserait la valeur juste avant un achat.
+  charts.materiel.data.datasets[0].tension = 0;
+  charts.materiel.update();
+
+    // Inventaire
+    const list = el("div", "mat-list");
+    achats.forEach((a) => list.appendChild(materielRow(a, materiel, owners.length > 1)));
+    card.appendChild(list);
+  }
+  card.appendChild(materielForm(null, materiel, owners));
+}
+
+function materielRow(a, materiel, showOwner) {
+  const today = todayStr();
+  const vendu = a.vente && a.vente.date && a.vente.date <= today;
+  const prevu = a.date > today;
+  const v = valeurAu(a, today);
+  const usure = a.prix ? Math.max(0, Math.min(1, 1 - v / a.prix)) : 0;
+  const row = el("div", "mat-row" + (vendu ? " is-sold" : "") + (prevu ? " is-prevu" : ""));
+  const etat = vendu ? `<span class="mat-chip">vendu ${euros(a.vente.prix)} le ${dateFr(a.vente.date)}</span>`
+    : prevu ? `<span class="mat-chip mat-chip-prevu">achat prévu</span>` : "";
+  row.innerHTML =
+    `<div class="mat-row-main"><b>${escapeHtml(a.nom || "Sans nom")}</b>` +
+      (showOwner ? `<span class="own-chip" style="--oc:${ownerColor(a.owner)}">${OWNER_LABEL[a.owner]}</span>` : "") + etat +
+      `<small>Acheté ${euros(a.prix)} le ${dateFr(a.date)} · ${a.duree || MATERIEL_DEFAUT.duree} ans · revente min. ${a.residuel ?? MATERIEL_DEFAUT.residuel} %` +
+      (a.estimation && a.estimation.date ? ` · estimé ${euros(a.estimation.valeur)} le ${dateFr(a.estimation.date)}` : "") + `</small></div>` +
+    `<div class="mat-row-val">${vendu || prevu ? "" : `<b>${euros(v)}</b><span class="mat-usure" title="Valeur perdue : ${Math.round(usure * 100)} %"><i style="width:${usure * 100}%"></i></span>`}</div>` +
+    `<div class="mat-row-actions"><button type="button" class="btn small" data-a="edit">Modifier</button>` +
+    `<button type="button" class="mat-del" data-a="del" title="Supprimer cet achat" aria-label="Supprimer">${TRASH_ICON}</button></div>`;
+  row.querySelector('[data-a="edit"]').addEventListener("click", () => {
+    const open = row.nextElementSibling && row.nextElementSibling.classList.contains("mat-form-edit");
+    if (open) row.nextElementSibling.remove();
+    else row.after(materielForm(a, materiel, [a.owner]));
+  });
+  row.querySelector('[data-a="del"]').addEventListener("click", () => {
+    if (!confirm(`Supprimer l'achat « ${a.nom} » (${euros(a.prix)}) ? Le poste Investissement matériel de ${monthLabel(a.date.slice(0, 7)).toLowerCase()} sera mis à jour.`)) return;
+    delete materiel[a.id];
+    saveMateriel(materiel, a.owner, [a.date.slice(0, 7)]);
+  });
+  return row;
+}
+
+// Formulaire d'achat : nouveau (`a` null) ou modification (avec valeur estimée et vente).
+function materielForm(a, materiel, owners) {
+  const today = todayStr();
+  const form = el("form", "mat-form" + (a ? " mat-form-edit" : ""));
+  const f = (label, html, cls = "") => `<label class="${cls}"><span>${label}</span>${html}</label>`;
+  form.innerHTML =
+    (a ? "" : `<div class="mat-form-title">＋ Nouvel achat</div>`) +
+    `<div class="mat-form-grid">` +
+    f("Objet", `<input name="nom" required placeholder="ex. Enceinte, micro HF…" value="${escapeAttr((a && a.nom) || "")}" />`, "mat-f-nom") +
+    (!a && owners.length > 1 ? f("Pour", `<select name="owner">${owners.map((k) => `<option value="${k}">${OWNER_LABEL[k]}</option>`).join("")}</select>`) : "") +
+    f("Date d'achat", `<input type="date" name="date" required value="${(a && a.date) || today}" />`) +
+    f("Prix", `<span class="cap-field"><input type="number" name="prix" step="0.01" min="0" required value="${a ? a.prix : ""}" /><i>€</i></span>`) +
+    f("Durée de vie", `<span class="cap-field"><input type="number" name="duree" step="0.5" min="0.5" value="${(a && a.duree) || MATERIEL_DEFAUT.duree}" /><i>ans</i></span>`) +
+    f("Revente minimale", `<span class="cap-field"><input type="number" name="residuel" step="5" min="0" max="100" value="${a && typeof a.residuel === "number" ? a.residuel : MATERIEL_DEFAUT.residuel}" /><i>%</i></span>`) +
+    (a ? f("Valeur estimée aujourd'hui", `<span class="cap-field"><input type="number" name="estimation" step="1" min="0" placeholder="${Math.round(valeurAu(a, today))}" value="${a.estimation && a.estimation.date === today ? a.estimation.valeur : ""}" /><i>€</i></span>`) : "") +
+    (a ? f("Vendu le", `<input type="date" name="venteDate" value="${(a.vente && a.vente.date) || ""}" />`) : "") +
+    (a ? f("Prix de vente", `<span class="cap-field"><input type="number" name="ventePrix" step="0.01" min="0" value="${a.vente ? a.vente.prix : ""}" /><i>€</i></span>`) : "") +
+    `</div>` +
+    `<button type="submit" class="btn small primary">${a ? "Enregistrer" : "Ajouter l'achat"}</button>`;
+  form.addEventListener("submit", (ev) => {
+    ev.preventDefault();
+    const E = form.elements;
+    const prix = parseFloat(E.prix.value);
+    if (!E.nom.value.trim() || !E.date.value || !(prix >= 0)) return;
+    const owner = a ? a.owner : (E.owner ? E.owner.value : owners[0]);
+    const id = a ? a.id : uid();
+    const next = {
+      owner, nom: E.nom.value.trim(), date: E.date.value, prix,
+      duree: parseFloat(E.duree.value) > 0 ? parseFloat(E.duree.value) : MATERIEL_DEFAUT.duree,
+      residuel: Math.min(100, Math.max(0, parseFloat(E.residuel.value) || 0)),
+      estimation: (a && a.estimation) || null,
+      vente: null
+    };
+    if (a) {
+      const est = parseFloat(E.estimation.value);
+      if (est >= 0) next.estimation = { valeur: est, date: today };
+      const vp = parseFloat(E.ventePrix.value);
+      if (E.venteDate.value) next.vente = { date: E.venteDate.value, prix: vp >= 0 ? vp : 0 };
+    }
+    materiel[id] = next;
+    saveMateriel(materiel, owner, [a && a.date.slice(0, 7), next.date.slice(0, 7)]);
+  });
+  return form;
+}
+
 // Mois abrégé sans point, lisible dans une case étroite : "nov", "déc", "janv", "févr"...
 function monthAbbr(id) {
   const [y, m] = id.split("-").map(Number);
@@ -3404,11 +3634,18 @@ async function renderAnalyse() {
   renderInvRendement($("#inv-rendement"), invRates, invSeries, invVerse, curId);
   const totalSeries = sumCumulSeries(epargneSeries, invSeries);
   const plans = plansInScope(settings.plans, currentScope);
+  const toutSeries = plans.length ? sumCumulSeries(totalSeries, plansSeries(plans, totalSeries.ids)) : null;
+  // Matériel : compté au cap seulement si on le choisit, à sa valeur estimée (pas au prix payé).
+  const achatsMat = achatsDe(settings.materiel, currentScope === "famille" ? OWNER_KEYS : [currentScope]);
+  const matSeries = achatsMat.length
+    ? { ids: totalSeries.ids, labels: totalSeries.labels, values: serieMateriel(achatsMat, totalSeries.ids).valeur }
+    : null;
   renderCap($("#epargne-cap"), currentScope, {
-    total: totalSeries, epargne: epargneSeries, investissement: invSeries,
-    tout: plans.length ? sumCumulSeries(totalSeries, plansSeries(plans, totalSeries.ids)) : null
+    total: totalSeries, epargne: epargneSeries, investissement: invSeries, tout: toutSeries,
+    patrimoine: matSeries ? sumCumulSeries(toutSeries || totalSeries, matSeries) : null
   }, curId, monthsById);
   renderPlans($("#plans-salariaux"), currentScope, settings.plans, curId);
+  renderMateriel($("#materiel"), currentScope, settings, months, curId);
 
   // Reste à vivre de chaque mois (pas cumulé) : la tendance mois après mois, avec les mois
   // en négatif mis en évidence pour repérer vite les périodes tendues. Juin 2026 est exclu :

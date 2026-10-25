@@ -241,6 +241,10 @@ describe("cloneForNewMonth", () => {
     });
   });
 
+  test("investissement matériel : l'achat du mois n'est pas recopié", () => {
+    assert.deepEqual(cloneForNewMonth({ values: { m: { amount: 1300, paid: true, materiel: true } } }).values, { m: { amount: 0, paid: false } });
+  });
+
   test("source absente ou sans values", () => {
     assert.deepEqual(cloneForNewMonth(null), { values: {}, bankBalances: {} });
     assert.deepEqual(cloneForNewMonth({}), { values: {}, bankBalances: {} });

@@ -175,7 +175,9 @@ export function computeTotals(cat, data, scope = "famille", opts = {}) {
 export function cloneForNewMonth(prev) {
   const values = {};
   Object.entries((prev && prev.values) || {}).forEach(([id, v]) => {
-    values[id] = { amount: v.amount || 0, paid: false };
+    // Investissement matériel (materiel.js) : montant calculé à partir des achats du mois, pas
+    // une dépense qui se répète.
+    values[id] = { amount: v.materiel ? 0 : v.amount || 0, paid: false };
   });
   return { values, bankBalances: {} };
 }

@@ -23,7 +23,7 @@
 // Le reste de l'appli (totaux, Prévisions, Historique, Analyse) continue de lire values comme
 // pour n'importe quel revenu. Un mois jamais touché par les séances reste en saisie manuelle.
 // Même version que l'import de budget-core.js dans app.js (un seul module chargé, pas de cache périmé).
-import { setItemValue, receivedOf, cashOf, virementOf } from "./budget-core.js?v=3";
+import { setItemValue, receivedOf, cashOf, virementOf } from "./budget-core.js?v=4";
 
 export const GESTION_SEANCES = "seances";
 export const STATUTS = ["prevue", "faite", "annulee"];
