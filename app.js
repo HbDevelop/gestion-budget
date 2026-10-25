@@ -7,7 +7,7 @@ import {
   getFirestore, doc, getDoc as fbGetDoc, setDoc as fbSetDoc, updateDoc as fbUpdateDoc, deleteField,
   collection, getDocs as fbGetDocs, query, orderBy
 } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
-import { isDemoEmail, createDemoStore, DEMO_LABELS } from "./demo.js?v=11";
+import { isDemoEmail, createDemoStore, DEMO_LABELS } from "./demo.js?v=12";
 import {
   monthId, addMonths, isActiveAt, inScope, isShared, receivedOf, cashOf, virementOf,
   withIncomeAmount, sumBankBalances, bankFor, cashFor, computeTotals, cloneForNewMonth,
@@ -17,9 +17,9 @@ import {
 import {
   isSeancesItem, hasSeances, seancesOfItem, monthOfDate, monthsNeeded, ajouterSeance, modifierSeance,
   payerSeance, annulerPaiement, supprimerSeance, arrieres, elevesOf, seancesATarifer, appliquerTarif,
-  datesRecurrentes, programmerSeances, seancesSerie, supprimerSeances, seancesFutures,
+  datesRecurrentes, programmerSeances, seancesSerie, supprimerSeances, seancesFutures, seancesFuturesEleve,
   seancesATraiter, marquerFaites
-} from "./seances.js?v=7";
+} from "./seances.js?v=8";
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -761,7 +761,7 @@ async function runSeanceOp(op, args, apply) {
     changes = apply(docs);
   } catch (e) {
     alert(e.message || String(e));
-    return;
+    return false;
   }
   const others = Object.keys(changes).filter((mid) => mid !== currentMonthId);
   if (changes[currentMonthId]) markChanged(changes[currentMonthId]);
@@ -771,6 +771,7 @@ async function runSeanceOp(op, args, apply) {
   if (changes[currentMonthId]) await saveMonth();
   if (others.length) await refreshArrieres();
   render();
+  return true;
 }
 
 function buildSeancesBlock(item) {
@@ -1114,7 +1115,7 @@ document.addEventListener("click", (ev) => {
 // Formulaire de séance : nouvelle (sans `edit`) ou modification d'une séance existante.
 function seanceForm(item, edit) {
   const form = el("form", edit ? "sx-form seance-edit" : "sx-form sx-new");
-  const eleves = elevesOf(item).filter((e) => e.actif !== false || (edit && e.id === edit.eleveId));
+  const eleves = elevesOf(item, { avec: edit && edit.eleveId }).filter((e) => e.actif !== false || (edit && e.id === edit.eleveId));
   const field = (label, html) => `<label class="sx-field"><span>${label}</span>${html}</label>`;
   form.innerHTML =
     (edit ? "" : `<div class="sx-form-title"><span class="sx-plus">＋</span> Nouvelle séance</div>`) +
@@ -1267,7 +1268,8 @@ function elevesEditor(item) {
       eleveAvatar(item, e.id) +
       `<input type="text" class="eleve-nom" value="${escapeAttr(e.nom)}" aria-label="Nom" />` +
       `<span class="sx-euro sx-tarif"><input type="number" class="eleve-tarif" step="0.01" min="0" value="${typeof e.tarif === "number" ? e.tarif : ""}" aria-label="Tarif par séance" /><i>€ / séance</i></span>` +
-      `<label class="sx-switch" title="${e.actif === false ? "Inactif : n'apparaît plus dans les nouvelles séances" : "Actif"}"><input type="checkbox" ${e.actif === false ? "" : "checked"} aria-label="Actif" /><span></span></label>`;
+      `<label class="sx-switch" title="${e.actif === false ? "Inactif : n'apparaît plus dans les nouvelles séances" : "Actif"}"><input type="checkbox" ${e.actif === false ? "" : "checked"} aria-label="Actif" /><span></span></label>` +
+      `<button type="button" class="sx-eleve-del" title="Supprimer l'élève et ses séances à venir" aria-label="Supprimer ${escapeAttr(e.nom)}">🗑</button>`;
     const target = () => item.eleves.find((x) => x.id === e.id);
     row.querySelector(".eleve-nom").addEventListener("change", (ev) => {
       const nom = ev.target.value.trim();
@@ -1293,6 +1295,19 @@ function elevesEditor(item) {
     });
     row.querySelector(".sx-switch input").addEventListener("change", (ev) => {
       target().actif = ev.target.checked;
+      save();
+    });
+    // Suppression : ses séances à venir non payées disparaissent ; il reste dans item.eleves
+    // (marqué supprimé) pour le nom de ses séances passées.
+    row.querySelector(".sx-eleve-del").addEventListener("click", async () => {
+      const futures = seancesFuturesEleve(await monthsForTarif(), item.id, e.id, maintenantStr());
+      const n = futures.length;
+      if (!confirm(`Supprimer ${e.nom} de la liste des élèves ?\n\n` +
+        (n ? `${n} séance${n > 1 ? "s" : ""} à venir ${n > 1 ? "seront" : "sera"} aussi supprimée${n > 1 ? "s" : ""}.` : "Aucune séance à venir.") +
+        ` Ses séances passées et payées sont gardées.`)) return;
+      if (n && !(await runSeanceOp("supprimerListe", { seances: futures }, (docs) => supprimerSeances(docs, futures)))) return;
+      Object.assign(target(), { actif: false, supprime: true });
+      if (tarifEnAttente && tarifEnAttente.eleveId === e.id) tarifEnAttente = null;
       save();
     });
     box.appendChild(row);
