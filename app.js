@@ -216,6 +216,11 @@ const progOuverts = new Set();
 let seancesAVenirListe = [];
 const futursOuverts = new Set();
 let seancesFlash = null;
+// Onglet Matériel : formulaire d'achat ouvert (et date proposée), message de confirmation,
+// section « Rentabilité et valeur » dépliée.
+let materielAjout = null;
+let materielFlash = null;
+let materielAnalyseOuverte = false;
 let charts = {
   pie: null, pieAvg: null, line: null, investment: null, cap: null, balance: null, occTop: null,
   famIncome: null, famSplit: null, famStack: null, materiel: null
@@ -1544,7 +1549,9 @@ function tarifPrompt(eleve) {
 function renderExpenseGroups() {
   groupsContainer.innerHTML = "";
   GROUPS.forEach((group) => {
-    const items = catalog.items.filter((it) => it.type === group.key && inScope(it, currentScope) && isActiveAt(it, currentMonthId) && hasAmount(it));
+    // Le poste matériel est toujours affiché : son bouton « ＋ achat » sert à saisir un achat.
+    const items = catalog.items.filter((it) => it.type === group.key && inScope(it, currentScope) && isActiveAt(it, currentMonthId) &&
+      (hasAmount(it) || posteMateriel(it.owner) === it));
     if (!items.length) return;
     const section = document.createElement("section");
     section.className = "card";
@@ -1576,6 +1583,18 @@ function buildSuiviRow(item) {
   if (v0.materiel) {
     amountInput.readOnly = true;
     amountInput.title = "Calculé à partir des achats : onglet Matériel";
+  }
+  // Raccourci : saisir un achat de ce mois dans l'onglet Matériel.
+  if (posteMateriel(item.owner) === item) {
+    const btn = el("button", "mat-shortcut", "＋ achat");
+    btn.type = "button";
+    btn.title = "Enregistrer un achat de matériel (onglet Matériel)";
+    btn.addEventListener("click", () => {
+      materielAjout = { date: currentMonthId === monthId(new Date()) ? todayStr() : `${currentMonthId}-01` };
+      if (currentScope !== item.owner) setScope(item.owner);
+      switchView("materiel");
+    });
+    div.querySelector(".label-text").appendChild(btn);
   }
   amountInput.addEventListener("input", () => {
     const c = current();
@@ -3166,8 +3185,10 @@ async function syncMaterielBudget(owner, mids, materiel) {
   }
 }
 
-// Enregistre l'inventaire, met le budget à jour (mois `mids`) puis redessine l'onglet.
-async function saveMateriel(materiel, owner, mids) {
+// Enregistre l'inventaire, met le budget à jour (mois `mids`) puis redessine l'onglet (avec un
+// message de confirmation `flash`).
+async function saveMateriel(materiel, owner, mids, flash = null) {
+  materielFlash = flash;
   try {
     await withSaveStatus(async () => {
       await persistMateriel(materiel);
@@ -3191,8 +3212,9 @@ function dateFr(d) {
 }
 
 // ---- Onglet Matériel ----
-// Une personne (l'onglet n'existe pas en Famille) : bilan, rentabilité, valeur dans le temps,
-// inventaire des achats, et ce qui est prévu au budget pour la suite.
+// Une personne (l'onglet n'existe pas en Famille). La saisie d'un achat d'abord (bouton en haut,
+// formulaire court), puis un bandeau de chiffres, l'inventaire (le plus récent en premier), ce
+// qui est prévu au budget, et en dernier la rentabilité et la courbe de valeur (dépliables).
 async function renderMaterielView() {
   const owner = currentScope;
   const item = posteMateriel(owner);
@@ -3207,100 +3229,110 @@ async function renderMaterielView() {
   const achats = achatsDe(materiel, owner);
   $("#materiel-title").textContent = item.label;
   root.innerHTML = "";
-  const titre = (t) => el("h3", "analyse-section-title", t);
+  const titre = (t, extra = "") => el("h3", "analyse-section-title", t + extra);
   const b = bilanMateriel(achats, today);
+  const sc = (settings.byScope && settings.byScope[owner]) || {};
+  const revenus = catalog.items.filter((it) => it.type === "income" && it.owner === owner && it.role !== "epargne_out" && !it.retiredAt);
+  const revId = revenus.some((it) => it.id === sc.materielRevenu) ? sc.materielRevenu : "";
+  const depuis = achats.length ? achats[0].date.slice(0, 7) : curId;
+  const rembourse = revId && b.investi ? revenusDepuis(months, revId, depuis, curId) : null;
 
-  // En-tête : explication + chiffres clés.
-  const hero = el("section", "card mat-card");
-  hero.innerHTML = `<div class="mat-head"><span class="mat-ico" aria-hidden="true">🔊</span><div><h3>Bilan du matériel</h3>` +
-    `<p>Matériel acheté pour une activité. Ce n'est pas de l'argent disponible : il est compté à part de l'épargne et de l'autonomie, ` +
-    `et sa valeur baisse avec le temps (revente minimale atteinte au bout de sa durée de vie).</p></div></div>`;
+  // 1. Saisie : bouton, puis formulaire ouvert juste en dessous.
+  const bar = el("div", "mat-toolbar");
+  const addBtn = el("button", "btn primary mat-add-btn", "＋ Ajouter un achat");
+  addBtn.type = "button";
+  addBtn.setAttribute("aria-expanded", String(!!materielAjout));
+  addBtn.addEventListener("click", () => { materielAjout = materielAjout ? null : { date: today }; renderMaterielView(); });
+  bar.appendChild(addBtn);
+  root.appendChild(bar);
+  if (materielFlash) {
+    root.appendChild(el("div", "sx-flash mat-flash", materielFlash));
+    materielFlash = null;
+  }
+  if (materielAjout) {
+    const form = materielForm(null, materiel, [owner], materielAjout.date);
+    root.appendChild(form);
+    setTimeout(() => form.elements.nom.focus(), 0);
+  }
+
+  // 2. Bandeau compact.
   if (achats.length) {
     const pct = b.investi ? Math.round((b.perte / b.investi) * 100) : 0;
-    const prevus = achats.filter((a) => a.date > today);
-    hero.insertAdjacentHTML("beforeend",
-      `<div class="mat-kpis">` +
-        `<div><small>Investi</small><b>${euros(b.investi)}</b><span>${b.gardes} objet${b.gardes > 1 ? "s" : ""}${b.vendus ? ` · ${b.vendus} vendu${b.vendus > 1 ? "s" : ""}` : ""}` +
-          `${prevus.length ? ` · ${prevus.length} achat${prevus.length > 1 ? "s" : ""} prévu${prevus.length > 1 ? "s" : ""}` : ""}</span></div>` +
-        `<div class="mat-kpi-main"><small>Valeur estimée aujourd'hui</small><b>${euros(b.valeur)}</b><span>ce qu'il vaudrait à la revente</span></div>` +
-        `<div><small>Perte de valeur</small><b class="negative">${b.perte > 0 ? "−" : ""}${euros(Math.abs(b.perte))}</b><span>${pct} % du prix payé</span></div>` +
-        (b.recupere ? `<div><small>Récupéré (ventes)</small><b>${euros(b.recupere)}</b><span>à saisir aussi en revenu du mois</span></div>` : "") +
-      `</div>`);
-  } else {
-    hero.insertAdjacentHTML("beforeend", `<p class="mat-empty">Aucun achat enregistré pour l'instant : ajoute le premier ci-dessous (sono, micros…).</p>`);
-  }
-  root.appendChild(hero);
-
-  // Rentabilité : revenus encaissés par l'activité depuis le premier achat.
-  if (achats.length && b.investi) {
-    root.appendChild(titre("Rentabilité"));
-    const sc = (settings.byScope && settings.byScope[owner]) || {};
-    const revenus = catalog.items.filter((it) => it.type === "income" && it.owner === owner && it.role !== "epargne_out" && !it.retiredAt);
-    const revId = revenus.some((it) => it.id === sc.materielRevenu) ? sc.materielRevenu : "";
-    const rent = el("section", "card mat-rent");
-    let html = `<label class="mat-rent-pick">Activité qui utilise ce matériel <select><option value="">— choisir un revenu —</option>` +
-      revenus.map((it) => `<option value="${escapeAttr(it.id)}"${it.id === revId ? " selected" : ""}>${escapeHtml(it.label)}</option>`).join("") + `</select></label>`;
-    if (revId) {
-      const depuis = achats[0].date.slice(0, 7);
-      const total = revenusDepuis(months, revId, depuis, curId);
-      const ratio = total / b.investi;
-      html += `<div class="mat-rent-bar"><i style="width:${Math.min(100, ratio * 100)}%"></i></div>` +
-        `<p>${ratio >= 1
-          ? `✓ <b>Rentabilisé</b> : ${euros(total)} encaissés depuis ${monthLabel(depuis)}, soit <b>${ratio.toLocaleString("fr-FR", { maximumFractionDigits: 1 })} fois</b> le prix du matériel.`
-          : `<b>${Math.round(ratio * 100)} %</b> du matériel remboursé par l'activité : ${euros(total)} encaissés depuis ${monthLabel(depuis)} sur ${euros(b.investi)} investis.`}</p>` +
-        `<small>Revenus encaissés (avant frais), pas le bénéfice : c'est un repère de remboursement.</small>`;
-    } else {
-      html += `<small>Choisis le revenu de l'activité (ex. musicothérapie) pour voir quelle part du matériel elle a déjà remboursée.</small>`;
-    }
-    rent.innerHTML = html;
-    rent.querySelector("select").addEventListener("change", async (ev) => {
-      await withSaveStatus(() => persistScopeSetting(owner, "materielRevenu", ev.target.value || null));
-      await renderMaterielView();
-    });
-    root.appendChild(rent);
+    const chiffre = (label, valeur, cls = "") => `<div class="mat-stat ${cls}"><small>${label}</small><b>${valeur}</b></div>`;
+    root.appendChild(el("div", "card mat-strip",
+      chiffre("Investi", euros(b.investi)) +
+      chiffre("Valeur estimée", euros(b.valeur), "mat-stat-main") +
+      chiffre("Perte de valeur", `${b.perte > 0 ? "−" : ""}${euros(Math.abs(b.perte))} <span>${pct} %</span>`, "mat-stat-neg") +
+      (rembourse != null ? chiffre("Remboursé par l'activité", `${Math.round((rembourse / b.investi) * 100)} %`, "mat-stat-ok") : "") +
+      (b.recupere ? chiffre("Récupéré (ventes)", euros(b.recupere)) : "")));
   }
 
-  // Valeur dans le temps : du premier achat à un an après aujourd'hui (ou après le dernier achat).
+  // 3. Inventaire : le plus récent en premier.
+  root.appendChild(titre("Inventaire", achats.length ? ` <small class="mat-count">${achats.length} achat${achats.length > 1 ? "s" : ""}</small>` : ""));
+  const inv = el("section", "card mat-inv");
   if (achats.length) {
-    root.appendChild(titre("Valeur dans le temps"));
+    const list = el("div", "mat-list");
+    [...achats].reverse().forEach((a) => list.appendChild(materielRow(a, materiel, false)));
+    inv.appendChild(list);
+  } else {
+    inv.appendChild(el("p", "mat-empty", "Aucun achat enregistré pour l'instant. Utilise « ＋ Ajouter un achat » en haut de la page (sono, micros…)."));
+  }
+  root.appendChild(inv);
+
+  // 4. Prévu au budget : montants saisis dans Prévisions pour les prochains mois (sans achat).
+  const prevus = months.filter(({ id, data }) => id >= curId && id <= addMonths(curId, 12) && data.values && data.values[item.id] &&
+    data.values[item.id].amount > 0 && !data.values[item.id].materiel).map(({ id, data }) => ({ id, amount: data.values[item.id].amount }));
+  root.appendChild(titre("Prévu au budget"));
+  root.appendChild(el("section", "card mat-prevu", prevus.length
+    ? `<ul>${prevus.map((x) => `<li><span>${capitalize(monthLabel(x.id))}</span><b>${euros(x.amount)}</b></li>`).join("")}</ul>` +
+      `<p class="mat-prevu-total">Total prévu sur 12 mois : <b>${euros(prevus.reduce((t, x) => t + x.amount, 0))}</b></p>` +
+      `<small>Saisi dans Prévisions → ${escapeHtml(item.label)}. Un achat enregistré un mois remplace la prévision de ce mois (elle revient si l'achat est supprimé).</small>`
+    : `<p>Aucun montant prévu pour du matériel sur les 12 prochains mois. Tu peux en prévoir dans <b>Prévisions → ${escapeHtml(item.label)}</b>.</p>`));
+
+  // 5. Rentabilité et valeur dans le temps : dépliable, en dernier.
+  if (!achats.length) return;
+  const det = el("details", "card mat-analyse");
+  det.open = materielAnalyseOuverte;
+  det.innerHTML = `<summary><span>📈 Rentabilité et valeur dans le temps</span><span class="sx-chev">▾</span></summary>`;
+  const rent = el("div", "mat-rent");
+  let html = `<label class="mat-rent-pick">Activité qui utilise ce matériel <select><option value="">— choisir un revenu —</option>` +
+    revenus.map((it) => `<option value="${escapeAttr(it.id)}"${it.id === revId ? " selected" : ""}>${escapeHtml(it.label)}</option>`).join("") + `</select></label>`;
+  if (rembourse != null) {
+    const ratio = rembourse / b.investi;
+    html += `<div class="mat-rent-bar"><i style="width:${Math.min(100, ratio * 100)}%"></i></div>` +
+      `<p>${ratio >= 1
+        ? `✓ <b>Rentabilisé</b> : ${euros(rembourse)} encaissés depuis ${monthLabel(depuis)}, soit <b>${ratio.toLocaleString("fr-FR", { maximumFractionDigits: 1 })} fois</b> le prix du matériel.`
+        : `<b>${Math.round(ratio * 100)} %</b> du matériel remboursé par l'activité : ${euros(rembourse)} encaissés depuis ${monthLabel(depuis)} sur ${euros(b.investi)} investis.`}</p>` +
+      `<small>Revenus encaissés (avant frais), pas le bénéfice : c'est un repère de remboursement.</small>`;
+  } else {
+    html += `<small>Choisis le revenu de l'activité (ex. musicothérapie) pour voir quelle part du matériel elle a déjà remboursée.</small>`;
+  }
+  rent.innerHTML = html;
+  rent.querySelector("select").addEventListener("change", async (ev) => {
+    await withSaveStatus(() => persistScopeSetting(owner, "materielRevenu", ev.target.value || null));
+    await renderMaterielView();
+  });
+  det.appendChild(rent);
+  const chartBox = el("div", "mat-chart", `<h4>Valeur estimée et total investi</h4>`);
+  const canvas = el("canvas");
+  chartBox.appendChild(canvas);
+  det.appendChild(chartBox);
+  root.appendChild(det);
+  // Courbe dessinée à l'ouverture (un graphique dans une section fermée n'a pas de taille).
+  const dessiner = () => {
+    if (charts.materiel || !det.open) return;
     const fin = addMonths([curId, achats[achats.length - 1].date.slice(0, 7)].sort().pop(), 12);
     const ids = [];
-    for (let id = achats[0].date.slice(0, 7); id <= fin; id = addMonths(id, 1)) ids.push(id);
+    for (let id = depuis; id <= fin; id = addMonths(id, 1)) ids.push(id);
     const serie = serieMateriel(achats, ids);
-    const card = el("section", "card chart-card mat-chart", `<h3>Valeur estimée et total investi</h3>`);
-    const canvas = el("canvas");
-    card.appendChild(canvas);
-    root.appendChild(card);
     charts.materiel = cumulLineChart(canvas, { ids, labels: ids.map(monthLabelShort), values: serie.valeur }, "Valeur estimée", MATERIEL_COULEUR, [],
       [{ label: "Total investi", data: serie.investi, borderColor: "#9ca3af", borderDash: [5, 4], borderWidth: 1.5, pointRadius: 0, tension: 0, stepped: true }]);
     // Traits droits : une courbe lissée creuserait la valeur juste avant un achat.
     charts.materiel.data.datasets[0].tension = 0;
     charts.materiel.update();
-  }
-
-  // Inventaire + ajout.
-  root.appendChild(titre("Inventaire"));
-  const inv = el("section", "card mat-inv");
-  if (achats.length) {
-    const list = el("div", "mat-list");
-    achats.forEach((a) => list.appendChild(materielRow(a, materiel, false)));
-    inv.appendChild(list);
-  }
-  inv.appendChild(materielForm(null, materiel, [owner]));
-  root.appendChild(inv);
-
-  // Prévu au budget : montants saisis dans Prévisions pour les prochains mois (sans achat).
-  const prevus = months.filter(({ id, data }) => id >= curId && id <= addMonths(curId, 12) && data.values && data.values[item.id] &&
-    data.values[item.id].amount > 0 && !data.values[item.id].materiel).map(({ id, data }) => ({ id, amount: data.values[item.id].amount }));
-  root.appendChild(titre("Prévu au budget"));
-  const prev = el("section", "card mat-prevu");
-  prev.innerHTML = prevus.length
-    ? `<p>Montants prévus pour du matériel dans <b>Prévisions → ${escapeHtml(item.label)}</b>, sur les 12 prochains mois :</p>` +
-      `<ul>${prevus.map((x) => `<li><span>${capitalize(monthLabel(x.id))}</span><b>${euros(x.amount)}</b></li>`).join("")}</ul>` +
-      `<p class="mat-prevu-total">Total prévu : <b>${euros(prevus.reduce((t, x) => t + x.amount, 0))}</b></p>` +
-      `<small>Quand un achat est enregistré un mois, il remplace la prévision de ce mois (elle revient si l'achat est supprimé).</small>`
-    : `<p>Aucun montant prévu pour du matériel sur les 12 prochains mois. Tu peux en prévoir dans <b>Prévisions → ${escapeHtml(item.label)}</b>.</p>`;
-  root.appendChild(prev);
+  };
+  det.addEventListener("toggle", () => { materielAnalyseOuverte = det.open; dessiner(); });
+  dessiner();
 }
 
 function materielRow(a, materiel, showOwner) {
@@ -3334,24 +3366,36 @@ function materielRow(a, materiel, showOwner) {
 }
 
 // Formulaire d'achat : nouveau (`a` null) ou modification (avec valeur estimée et vente).
-function materielForm(a, materiel, owners) {
+// Formulaire d'achat. Nouveau (`a` null) : objet, date, prix ; durée de vie et revente minimale
+// sous « Plus d'options » (valeurs par défaut). Modification : tous les champs, avec valeur
+// estimée et vente.
+function materielForm(a, materiel, owners, dateProposee = null) {
   const today = todayStr();
-  const form = el("form", "mat-form" + (a ? " mat-form-edit" : ""));
+  const form = el("form", "mat-form" + (a ? " mat-form-edit" : " mat-form-new"));
   const f = (label, html, cls = "") => `<label class="${cls}"><span>${label}</span>${html}</label>`;
+  const options =
+    f("Durée de vie", `<span class="cap-field"><input type="number" name="duree" step="0.5" min="0.5" value="${(a && a.duree) || MATERIEL_DEFAUT.duree}" /><i>ans</i></span>`) +
+    f("Revente minimale", `<span class="cap-field"><input type="number" name="residuel" step="5" min="0" max="100" value="${a && typeof a.residuel === "number" ? a.residuel : MATERIEL_DEFAUT.residuel}" /><i>%</i></span>`);
   form.innerHTML =
-    (a ? "" : `<div class="mat-form-title">＋ Nouvel achat</div>`) +
+    (a ? "" : `<div class="mat-form-title">Nouvel achat</div>`) +
     `<div class="mat-form-grid">` +
     f("Objet", `<input name="nom" required placeholder="ex. Enceinte, micro HF…" value="${escapeAttr((a && a.nom) || "")}" />`, "mat-f-nom") +
     (!a && owners.length > 1 ? f("Pour", `<select name="owner">${owners.map((k) => `<option value="${k}">${OWNER_LABEL[k]}</option>`).join("")}</select>`) : "") +
-    f("Date d'achat", `<input type="date" name="date" required value="${(a && a.date) || today}" />`) +
-    f("Prix", `<span class="cap-field"><input type="number" name="prix" step="0.01" min="0" required value="${a ? a.prix : ""}" /><i>€</i></span>`) +
-    f("Durée de vie", `<span class="cap-field"><input type="number" name="duree" step="0.5" min="0.5" value="${(a && a.duree) || MATERIEL_DEFAUT.duree}" /><i>ans</i></span>`) +
-    f("Revente minimale", `<span class="cap-field"><input type="number" name="residuel" step="5" min="0" max="100" value="${a && typeof a.residuel === "number" ? a.residuel : MATERIEL_DEFAUT.residuel}" /><i>%</i></span>`) +
+    f("Date d'achat", `<input type="date" name="date" required value="${(a && a.date) || dateProposee || today}" />`) +
+    f("Prix", `<span class="cap-field"><input type="number" name="prix" step="0.01" min="0" required inputmode="decimal" value="${a ? a.prix : ""}" /><i>€</i></span>`) +
+    (a ? options : "") +
     (a ? f("Valeur estimée aujourd'hui", `<span class="cap-field"><input type="number" name="estimation" step="1" min="0" placeholder="${Math.round(valeurAu(a, today))}" value="${a.estimation && a.estimation.date === today ? a.estimation.valeur : ""}" /><i>€</i></span>`) : "") +
     (a ? f("Vendu le", `<input type="date" name="venteDate" value="${(a.vente && a.vente.date) || ""}" />`) : "") +
     (a ? f("Prix de vente", `<span class="cap-field"><input type="number" name="ventePrix" step="0.01" min="0" value="${a.vente ? a.vente.prix : ""}" /><i>€</i></span>`) : "") +
     `</div>` +
-    `<button type="submit" class="btn small primary">${a ? "Enregistrer" : "Ajouter l'achat"}</button>`;
+    (a ? "" : `<details class="mat-options"><summary>Plus d'options <small>durée de vie ${MATERIEL_DEFAUT.duree} ans · revente min. ${MATERIEL_DEFAUT.residuel} %</small></summary><div class="mat-form-grid">${options}</div></details>`) +
+    `<div class="mat-form-actions">` +
+    `<button type="button" class="btn small" data-a="annuler">Annuler</button>` +
+    `<button type="submit" class="btn small primary">${a ? "Enregistrer" : "Ajouter l'achat"}</button></div>`;
+  form.querySelector('[data-a="annuler"]').addEventListener("click", () => {
+    if (a) form.remove();
+    else { materielAjout = null; renderMaterielView(); }
+  });
   form.addEventListener("submit", (ev) => {
     ev.preventDefault();
     const E = form.elements;
@@ -3373,7 +3417,9 @@ function materielForm(a, materiel, owners) {
       if (E.venteDate.value) next.vente = { date: E.venteDate.value, prix: vp >= 0 ? vp : 0 };
     }
     materiel[id] = next;
-    saveMateriel(materiel, owner, [a && a.date.slice(0, 7), next.date.slice(0, 7)]);
+    if (!a) materielAjout = null;
+    saveMateriel(materiel, owner, [a && a.date.slice(0, 7), next.date.slice(0, 7)],
+      a ? `✓ <b>${escapeHtml(next.nom)}</b> mis à jour.` : `✓ Achat ajouté : <b>${escapeHtml(next.nom)}</b>, ${euros(prix)} le ${dateFr(next.date)}.`);
   });
   return form;
 }
