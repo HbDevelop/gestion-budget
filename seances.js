@@ -23,7 +23,7 @@
 // Le reste de l'appli (totaux, Prévisions, Historique, Analyse) continue de lire values comme
 // pour n'importe quel revenu. Un mois jamais touché par les séances reste en saisie manuelle.
 // Même version que l'import de budget-core.js dans app.js (un seul module chargé, pas de cache périmé).
-import { setItemValue, receivedOf, cashOf } from "./budget-core.js?v=3";
+import { setItemValue, receivedOf, cashOf, virementOf } from "./budget-core.js?v=3";
 
 export const GESTION_SEANCES = "seances";
 export const STATUTS = ["prevue", "faite", "annulee"];
@@ -490,4 +490,169 @@ export function marquerFaites(docs, seances) {
 export function elevesOf(item, { avec = null } = {}) {
   return ((item && item.eleves) || []).filter((e) => !e.supprime || e.id === avec).sort((a, b) =>
     (a.actif === false) - (b.actif === false) || String(a.nom).localeCompare(String(b.nom), "fr"));
+}
+
+// ---- Analyse de l'activité (onglet Études) ----
+
+const JOUR_MS = 86400000;
+const jourUTC = (date) => Date.UTC(+date.slice(0, 4), +date.slice(5, 7) - 1, +date.slice(8, 10));
+
+// Bilan de l'activité depuis son démarrage, pour les postes à séances `items` d'une personne.
+// `months` = [{ id, data }] (tous les mois, triés), `maintenant` = "AAAA-MM-JJTHH:MM".
+// L'argent reçu vient de values (comme le reste de l'appli : y compris les mois saisis à la
+// main avant la première séance) ; le reste vient des séances elles-mêmes.
+// Renvoie null si aucun mois n'a d'encaissé ni de séance.
+export function statsActivite(months, items, maintenant) {
+  const ids = items.map((it) => it.id);
+  const cur = monthOfDate(maintenant);
+  const seances = [];
+  months.forEach(({ id, data }) => {
+    Object.entries((data && data.seances) || {}).forEach(([sid, s]) => {
+      if (s && ids.includes(s.itemId)) seances.push({ id: sid, mois: id, ...s });
+    });
+  });
+  seances.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+
+  // Démarrage : premier mois avec de l'argent reçu ou une séance.
+  const recuDuMois = (data) => ids.reduce((acc, itemId) => {
+    const v = data && data.values && data.values[itemId];
+    acc.virement += virementOf(v);
+    acc.especes += cashOf(v);
+    return acc;
+  }, { virement: 0, especes: 0 });
+  const debutRecu = months.find(({ id, data }) => {
+    if (id > cur) return false;
+    const r = recuDuMois(data);
+    return r.virement + r.especes > 0;
+  });
+  const debuts = [debutRecu && debutRecu.id, seances.length && seances[0].mois].filter(Boolean).sort();
+  if (!debuts.length) return null;
+  const debut = debuts[0];
+
+  // Mois par mois : du démarrage au dernier mois qui a une séance prévue (ou au mois en cours).
+  const fin = seances.reduce((m, s) => (s.statut !== "annulee" && s.mois > m ? s.mois : m), cur);
+  const parMois = {};
+  months.forEach(({ id, data }) => {
+    if (id < debut || id > fin) return;
+    const r = recuDuMois(data);
+    parMois[id] = { id, virement: cents(r.virement), especes: cents(r.especes), aEncaisser: 0, faites: 0, annulees: 0, prevues: 0 };
+  });
+  for (let id = debut; id <= fin; id = addMonthId(id, 1)) {
+    if (!parMois[id]) parMois[id] = { id, virement: 0, especes: 0, aEncaisser: 0, faites: 0, annulees: 0, prevues: 0 };
+  }
+
+  // Par élève, fiabilité, rythme, à venir.
+  const nomOf = {};
+  const statutOf = {};
+  items.forEach((it) => (it.eleves || []).forEach((e) => {
+    nomOf[`${it.id}|${e.id}`] = e.nom;
+    statutOf[`${it.id}|${e.id}`] = e.supprime ? "supprime" : e.actif === false ? "inactif" : "actif";
+  }));
+  const eleves = {};
+  const eleveOf = (s) => {
+    const k = `${s.itemId}|${s.eleveId || ""}`;
+    if (!eleves[k]) {
+      eleves[k] = {
+        itemId: s.itemId, eleveId: s.eleveId || null, nom: nomOf[k] || "Sans élève", statut: statutOf[k] || "actif",
+        faites: 0, annulees: 0, passees: 0, paye: 0, impaye: 0, premiere: null, derniere: null, prochaine: null
+      };
+    }
+    return eleves[k];
+  };
+  // Élèves sans séance (ajoutés mais pas encore venus) : listés aussi, sauf les supprimés.
+  items.forEach((it) => (it.eleves || []).forEach((e) => { if (!e.supprime) eleveOf({ itemId: it.id, eleveId: e.id }); }));
+
+  let faites = 0, annulees = 0, passees = 0, sommeFaites = 0, aTraiter = 0;
+  const impayes = { nombre: 0, total: 0 };
+  const delais = [];
+  const grille = Array.from({ length: 7 }, () => Array(24).fill(0));
+  const aVenir = { nombre: 0, total: 0, prochaine: null, parMois: {} };
+
+  seances.forEach((s) => {
+    const e = eleveOf(s);
+    const m = parMois[s.mois];
+    const passee = s.date <= maintenant;
+    if (s.statut === "annulee") {
+      if (m) m.annulees += 1;
+      if (passee) { annulees += 1; passees += 1; e.annulees += 1; e.passees += 1; }
+      return;
+    }
+    // Rythme : jours et heures des séances non annulées (passées et prévues).
+    grille[(new Date(jourUTC(s.date)).getUTCDay() + 6) % 7][+s.date.slice(11, 13)] += 1;
+    if (m && !s.paiement) m.aEncaisser = cents(m.aEncaisser + (s.prix || 0));
+    if (s.paiement) {
+      e.paye = cents(e.paye + (s.prix || 0));
+      delais.push(Math.round((jourUTC(s.paiement.date) - jourUTC(s.date)) / JOUR_MS));
+    }
+    if (passee) {
+      passees += 1;
+      e.passees += 1;
+      if (!e.premiere) e.premiere = s.date;
+      e.derniere = s.date;
+      if (!s.paiement) {
+        impayes.nombre += 1;
+        impayes.total = cents(impayes.total + (s.prix || 0));
+        e.impaye = cents(e.impaye + (s.prix || 0));
+      }
+      if (s.statut === "prevue") aTraiter += 1;
+    } else {
+      if (m) m.prevues += 1;
+      if (!e.prochaine) e.prochaine = s.date;
+      aVenir.nombre += 1;
+      aVenir.total = cents(aVenir.total + (s.prix || 0));
+      if (!aVenir.prochaine) aVenir.prochaine = { date: s.date, nom: e.nom, prix: s.prix };
+      const pm = aVenir.parMois[s.mois] || (aVenir.parMois[s.mois] = { id: s.mois, nombre: 0, total: 0 });
+      pm.nombre += 1;
+      pm.total = cents(pm.total + (s.prix || 0));
+    }
+    if (s.statut === "faite") {
+      faites += 1;
+      sommeFaites += s.prix || 0;
+      e.faites += 1;
+      if (m) m.faites += 1;
+    }
+  });
+
+  const mois = Object.values(parMois).sort((a, b) => (a.id < b.id ? -1 : 1));
+  const virement = cents(mois.reduce((t, m) => t + (m.id <= cur ? m.virement : 0), 0));
+  const especes = cents(mois.reduce((t, m) => t + (m.id <= cur ? m.especes : 0), 0));
+  // Moyenne mensuelle sur les mois terminés (le mois en cours n'est pas complet).
+  const termines = mois.filter((m) => m.id < cur);
+  const moyenneMois = termines.length ? cents(termines.reduce((t, m) => t + m.virement + m.especes, 0) / termines.length) : null;
+
+  const top = [];
+  grille.forEach((heures, jour) => heures.forEach((n, heure) => { if (n) top.push({ jour, heure, n }); }));
+  top.sort((a, b) => b.n - a.n || a.jour - b.jour || a.heure - b.heure);
+
+  return {
+    debut,
+    debutSeances: seances.length ? seances[0].date : null,
+    nbMois: monthsBetween(debut, cur) + 1,
+    totaux: {
+      encaisse: cents(virement + especes), virement, especes,
+      faites, prixMoyen: faites ? cents(sommeFaites / faites) : null, moyenneMois
+    },
+    mois,
+    eleves: Object.values(eleves)
+      .map((e) => ({ ...e, tauxAnnulation: e.passees ? e.annulees / e.passees : null }))
+      .sort((a, b) => (a.statut === "supprime") - (b.statut === "supprime") || b.paye - a.paye || a.nom.localeCompare(b.nom, "fr")),
+    fiabilite: {
+      tauxAnnulation: passees ? annulees / passees : null, annulees, passees, impayes, aTraiter,
+      delaiMoyen: delais.length ? Math.round((delais.reduce((t, d) => t + d, 0) / delais.length) * 10) / 10 : null
+    },
+    rythme: { grille, top: top.slice(0, 3) },
+    aVenir: { ...aVenir, parMois: Object.values(aVenir.parMois).sort((a, b) => (a.id < b.id ? -1 : 1)) }
+  };
+}
+
+function addMonthId(id, delta) {
+  const [y, m] = id.split("-").map(Number);
+  const t = y * 12 + (m - 1) + delta;
+  return `${Math.floor(t / 12)}-${String((t % 12) + 1).padStart(2, "0")}`;
+}
+
+function monthsBetween(a, b) {
+  const [ya, ma] = a.split("-").map(Number);
+  const [yb, mb] = b.split("-").map(Number);
+  return (yb - ya) * 12 + (mb - ma);
 }

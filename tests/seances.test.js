@@ -6,7 +6,7 @@ import {
   isSeancesItem, monthOfDate, seancesOfItem, seancesValue, recomputeItem, monthsNeeded,
   ajouterSeance, modifierSeance, payerSeance, annulerPaiement, supprimerSeance, arrieres, elevesOf,
   seancesATarifer, appliquerTarif, datesRecurrentes, programmerSeances, seancesSerie, supprimerSeances,
-  seancesFuturesEleve, MAX_PROGRAMMATION, seancesFutures, seancesATraiter, marquerFaites
+  seancesFuturesEleve, statsActivite, MAX_PROGRAMMATION, seancesFutures, seancesATraiter, marquerFaites
 } from "../seances.js";
 import { computeTotals, saveMonthChanges, monthPath } from "../budget-core.js";
 import { createFakeFirestore } from "./helpers/fake-firestore.js";
@@ -581,5 +581,72 @@ describe("bascule faite / pas faite", () => {
     modifierSeance(docs, "2026-10", "a", { prix: 30 });
     modifierSeance(docs, "2026-10", "a", { statut: "faite" });
     assert.equal(docs["2026-10"].seances.a.statut, "faite");
+  });
+});
+
+describe("analyse de l'activité (onglet Études)", () => {
+  const list = (d) => Object.entries(d).sort().map(([id, data]) => ({ id, data }));
+  const item = { ...etude, eleves: [{ id: "lina", nom: "Lina" }, { id: "adam", nom: "Adam", actif: false, supprime: true }, { id: "zoe", nom: "Zoé" }] };
+
+  test("aucune activité : null", () => {
+    assert.equal(statsActivite([{ id: "2026-10", data: empty() }], [item], "2026-10-15T12:00"), null);
+  });
+
+  test("démarrage, encaissé, séances, élèves, fiabilité, rythme, à venir", () => {
+    // Août : saisi à la main (200 € reçus dont 50 en espèces), avant les séances.
+    const docs = {
+      "2026-08": { values: { [ETU]: { amount: 200, received: 200, receivedCash: 50, paid: true } } },
+      "2026-09": empty(), "2026-10": empty(), "2026-11": empty()
+    };
+    // Mardi 01/09 18h et jeudi 03/09 18h : faites, payées (virement le 01/09, espèces le 05/09).
+    ajouterSeance(docs, "a", seance("2026-09-01T18:00", 30, { statut: "faite" }));
+    payerSeance(docs, "2026-09", "a", "virement", "2026-09-01");
+    ajouterSeance(docs, "b", seance("2026-09-03T18:00", 30, { statut: "faite" }));
+    payerSeance(docs, "2026-09", "b", "especes", "2026-09-05");
+    // Adam (supprimé) : une séance faite, payée 2 jours après, une annulée.
+    ajouterSeance(docs, "c", seance("2026-09-08T18:00", 20, { statut: "faite", eleveId: "adam" }));
+    payerSeance(docs, "2026-09", "c", "virement", "2026-09-10");
+    ajouterSeance(docs, "d", seance("2026-09-10T10:00", 20, { statut: "annulee", eleveId: "adam" }));
+    // Octobre : une faite non payée (impayé), une passée encore « prévue » (à traiter), une à venir.
+    ajouterSeance(docs, "e", seance("2026-10-06T18:00", 30, { statut: "faite" }));
+    ajouterSeance(docs, "f", seance("2026-10-13T18:00", 30));
+    ajouterSeance(docs, "g", seance("2026-10-20T18:00", 30));
+    ajouterSeance(docs, "h", seance("2026-11-03T18:00", 30));
+    const st = statsActivite(list(docs), [item], "2026-10-15T12:00");
+
+    assert.equal(st.debut, "2026-08");
+    assert.equal(st.debutSeances, "2026-09-01T18:00");
+    assert.equal(st.nbMois, 3);
+    assert.deepEqual(st.totaux, { encaisse: 280, virement: 200, especes: 80, faites: 4, prixMoyen: 27.5, moyenneMois: 140 });
+    assert.deepEqual(st.mois.map((m) => m.id), ["2026-08", "2026-09", "2026-10", "2026-11"]);
+    assert.deepEqual(st.mois[1], { id: "2026-09", virement: 50, especes: 30, aEncaisser: 0, faites: 3, annulees: 1, prevues: 0 });
+    assert.deepEqual(st.mois[2], { id: "2026-10", virement: 0, especes: 0, aEncaisser: 90, faites: 1, annulees: 0, prevues: 1 });
+    assert.equal(st.mois[3].prevues, 1);
+
+    const [lina, zoe, adam] = st.eleves;
+    assert.deepEqual([lina.nom, zoe.nom, adam.nom], ["Lina", "Zoé", "Adam"]);
+    assert.deepEqual(
+      { faites: lina.faites, paye: lina.paye, impaye: lina.impaye, premiere: lina.premiere, derniere: lina.derniere, prochaine: lina.prochaine },
+      { faites: 3, paye: 60, impaye: 60, premiere: "2026-09-01T18:00", derniere: "2026-10-13T18:00", prochaine: "2026-10-20T18:00" });
+    assert.equal(zoe.passees, 0);
+    assert.equal(zoe.tauxAnnulation, null);
+    assert.equal(adam.statut, "supprime");
+    assert.equal(adam.tauxAnnulation, 0.5);
+
+    assert.equal(st.fiabilite.annulees, 1);
+    assert.equal(st.fiabilite.passees, 6);
+    assert.deepEqual(st.fiabilite.impayes, { nombre: 2, total: 60 });
+    assert.equal(st.fiabilite.aTraiter, 1);
+    assert.equal(st.fiabilite.delaiMoyen, 1.3); // 0, 2 et 2 jours
+
+    // Mardi 18 h : 01/09, 08/09, 06/10, 13/10, 20/10, 03/11.
+    assert.deepEqual(st.rythme.top[0], { jour: 1, heure: 18, n: 6 });
+    assert.equal(st.rythme.grille[3][18], 1);
+    assert.equal(st.rythme.grille[3][10], 0);
+
+    assert.equal(st.aVenir.nombre, 2);
+    assert.equal(st.aVenir.total, 60);
+    assert.deepEqual(st.aVenir.prochaine, { date: "2026-10-20T18:00", nom: "Lina", prix: 30 });
+    assert.deepEqual(st.aVenir.parMois.map((m) => [m.id, m.nombre]), [["2026-10", 1], ["2026-11", 1]]);
   });
 });

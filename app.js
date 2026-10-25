@@ -7,7 +7,7 @@ import {
   getFirestore, doc, getDoc as fbGetDoc, setDoc as fbSetDoc, updateDoc as fbUpdateDoc, deleteField,
   collection, getDocs as fbGetDocs, query, orderBy
 } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
-import { isDemoEmail, createDemoStore, DEMO_LABELS } from "./demo.js?v=12";
+import { isDemoEmail, createDemoStore, DEMO_LABELS } from "./demo.js?v=13";
 import {
   monthId, addMonths, isActiveAt, inScope, isShared, receivedOf, cashOf, virementOf,
   withIncomeAmount, sumBankBalances, bankFor, cashFor, computeTotals, cloneForNewMonth,
@@ -18,8 +18,9 @@ import {
   isSeancesItem, hasSeances, seancesOfItem, monthOfDate, monthsNeeded, ajouterSeance, modifierSeance,
   payerSeance, annulerPaiement, supprimerSeance, arrieres, elevesOf, seancesATarifer, appliquerTarif,
   datesRecurrentes, programmerSeances, seancesSerie, supprimerSeances, seancesFutures, seancesFuturesEleve,
-  seancesATraiter, marquerFaites
-} from "./seances.js?v=8";
+  seancesATraiter, marquerFaites, statsActivite
+} from "./seances.js?v=9";
+import { renderEtudes, eleveHue } from "./etudes.js?v=1";
 
 const app = initializeApp(firebaseConfig);
 const auth = getAuth(app);
@@ -259,6 +260,7 @@ const suiviIndividual = $("#suivi-individual");
 const suiviFamille = $("#suivi-famille");
 const analyseFamilleCards = document.querySelectorAll(".famille-only");
 const forecastEditToggle = $("#forecast-edit-toggle");
+const navEtudes = $("#nav-etudes");
 
 // ---- Sélecteur d'espace ----
 const SCOPE_TABS = [{ key: "famille", label: "Famille" }, ...SPACES.map((s) => ({ key: s.key, label: s.label }))];
@@ -294,6 +296,7 @@ function setScope(scope) {
     b.setAttribute("aria-selected", on ? "true" : "false");
   });
   scopeHint.textContent = scopeHintText(scope);
+  if (updateEtudesTab()) return;
   rerenderCurrentView();
 }
 
@@ -302,6 +305,32 @@ function rerenderCurrentView() {
   else if (currentView === "historique") renderHistory();
   else if (currentView === "previsions") renderForecast();
   else if (currentView === "analyse") renderAnalyse();
+  else if (currentView === "etudes") renderEtudesView();
+}
+
+// ---- Onglet Études (etudes.js) ----
+// Postes à séances de la personne affichée : l'onglet n'existe que pour elle (pas en Famille).
+function etudesItems(scope) {
+  if (!catalog || scope === "famille") return [];
+  return catalog.items.filter((it) => isSeancesItem(it) && it.owner === scope);
+}
+
+// Affiche ou masque l'onglet ; s'il disparaît alors qu'il est ouvert, retour au Suivi
+// (renvoie true dans ce cas : la vue est déjà redessinée).
+function updateEtudesTab() {
+  const on = etudesItems(currentScope).length > 0;
+  navEtudes.classList.toggle("hidden", !on);
+  if (!on && currentView === "etudes") { switchView("suivi"); return true; }
+  return false;
+}
+
+async function renderEtudesView() {
+  const items = etudesItems(currentScope);
+  const maintenant = maintenantStr();
+  const stats = statsActivite(await monthsForTarif(), items, maintenant);
+  const label = items.length === 1 ? items[0].label : "Cours";
+  $("#etudes-title").textContent = label;
+  renderEtudes($("#etudes-root"), stats, { label, maintenant });
 }
 
 // ---- Auth ----
@@ -363,6 +392,7 @@ onAuthStateChanged(auth, async (user) => {
 
   appShell.classList.remove("hidden");
   buildScopeSwitch();
+  updateEtudesTab();
   await loadMonth(currentMonthId);
 });
 
@@ -399,6 +429,7 @@ async function switchView(view) {
   if (view === "historique") await renderHistory();
   if (view === "previsions") await renderForecast();
   if (view === "analyse") await renderAnalyse();
+  if (view === "etudes") await renderEtudesView();
 }
 
 // ---- Firestore : catalogue de postes ----
@@ -438,6 +469,7 @@ async function persistScopeSetting(owner, key, value) {
 
 async function persistCatalog(cat) {
   await setDoc(doc(db, "meta", "catalog"), cat);
+  updateEtudesTab();
 }
 
 // Migration douce : tout poste sans `owner` (ou avec un owner inconnu, ex. ancien "commun")
@@ -854,13 +886,6 @@ function buildSeancesBlock(item) {
   return block;
 }
 
-// Couleur d'avatar stable par élève (teinte dérivée de son identifiant).
-function eleveHue(id) {
-  let h = 0;
-  for (const c of String(id || "")) h = (h * 31 + c.charCodeAt(0)) >>> 0;
-  // Angle d'or : deux identifiants proches donnent quand même des teintes bien distinctes.
-  return Math.round((h * 137.508) % 360);
-}
 function eleveAvatar(item, eleveId) {
   const nom = eleveNom(item, eleveId);
   const lettre = nom === "—" ? "?" : nom.trim().charAt(0).toUpperCase();

@@ -6,7 +6,7 @@
   <title>Gestion Budget</title>
   <link rel="icon" type="image/svg+xml" href="favicon.svg?v=1" />
   <link rel="icon" href="data:image/svg+xml,%3Csvg%20xmlns='http://www.w3.org/2000/svg'%20viewBox='0%200%2032%2032'%3E%3Crect%20width='32'%20height='32'%20rx='7'%20fill='%232563eb'/%3E%3Ctext%20x='16'%20y='16'%20font-family='Arial,sans-serif'%20font-size='22'%20font-weight='700'%20text-anchor='middle'%20dominant-baseline='central'%20fill='%23fff'%3E%E2%82%AC%3C/text%3E%3C/svg%3E" />
-  <link rel="stylesheet" href="style.css?v=54" />
+  <link rel="stylesheet" href="style.css?v=55" />
   <script src="https://accounts.google.com/gsi/client" async defer></script>
   <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
 </head>
@@ -38,6 +38,8 @@
         <button data-view="previsions" class="nav-btn">Prévisions</button>
         <button data-view="historique" class="nav-btn">Historique</button>
         <button data-view="analyse" class="nav-btn">Analyse</button>
+        <!-- Seulement dans l'espace d'une personne qui a un revenu géré par séances -->
+        <button id="nav-etudes" data-view="etudes" class="nav-btn hidden">🎓 Études</button>
       </nav>
       <div class="topbar-actions">
         <span id="user-label" class="user-label"></span>
@@ -277,8 +279,17 @@
         </div>
       </main>
     </div>
+
+    <!-- Vue : activité d'études (postes à séances de la personne affichée, voir etudes.js) -->
+    <div id="view-etudes" class="view hidden">
+      <main class="content etudes">
+        <h2 class="view-title">Activité : <span id="etudes-title"></span></h2>
+        <p class="view-subtitle">Bilan depuis le démarrage : argent reçu, séances, élèves, régularité et ce qui est déjà programmé.</p>
+        <div id="etudes-root"></div>
+      </main>
+    </div>
   </div>
 
-  <script type="module" src="app.js?v=82"></script>
+  <script type="module" src="app.js?v=83"></script>
 </body>
 </html>

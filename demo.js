@@ -4,7 +4,7 @@
 // rechargement). Le compte de démo ne doit PAS figurer dans les règles Firestore : même en
 // contournant l'appli, il n'a ainsi aucun accès aux vraies données.
 
-import { ajouterSeance, payerSeance } from "./seances.js?v=8";
+import { ajouterSeance, payerSeance } from "./seances.js?v=9";
 
 // Empreinte SHA-256 de l'adresse du compte de démo (en minuscules) : l'adresse elle-même ne
 // figure pas dans ce dépôt public. Pour changer de compte de démo, remplacer cette empreinte.
@@ -94,8 +94,8 @@ function buildDemoData(owners) {
     return {
       "d-sal-a": 3150, "d-prime-a": m === 3 ? 2500 : 0, "d-reprise-a": id === addMonths(cur, -8) ? 600 : 0,
       "d-sal-b": 2480, "d-caf-b": 141.99,
-      // Avant les séances enregistrées (deux derniers mois) : montant saisi à la main.
-      "d-cours-b": id < addMonths(cur, -1) ? 160 : id > cur ? 180 : 0,
+      // Avant les séances enregistrées (six derniers mois et le suivant) : montant saisi à la main.
+      "d-cours-b": id < addMonths(cur, -5) ? 160 : id > addMonths(cur, 1) ? 180 : 0,
       "d-loyer": 1180, "d-elec": m >= 11 || m <= 2 ? 112 : 74, "d-box": 29.99, "d-mob-a": 12.99,
       "d-assu-auto": 54.3, "d-essence": between(90, 145), "d-abos": 27.98,
       "d-courses": between(410, 530), "d-creche": 380, "d-mutuelle": 42.5, "d-transport": 86.4, "d-mob-b": 9.99,
@@ -150,27 +150,40 @@ function buildDemoData(owners) {
   return { "meta/catalog": { items }, "meta/settings": settings, months };
 }
 
-// Séances du mois dernier (toutes faites, une pas encore payée) et du mois en cours (faites
-// avant aujourd'hui, une annulée, les suivantes prévues), via les mêmes opérations que l'appli.
+// Six mois de séances jusqu'au mois prochain, via les mêmes opérations que l'appli : Inès le
+// lundi et le mercredi (espèces, payées le jour même), Noah le mardi et le jeudi depuis trois
+// mois (virement, quelques jours après), Sami le samedi matin jusqu'à il y a deux mois (inactif
+// depuis). Quelques annulations, et les séances de Noah des dix derniers jours pas encore payées.
 function addDemoSeances(months, cur) {
-  const prev = addMonths(cur, -1);
-  const today = new Date().getDate();
-  const add = (mid, day, eleveId, prix, statut, pay) => {
-    const id = `d-s-${mid}-${day}`;
-    const date = `${mid}-${String(day).padStart(2, "0")}`;
-    ajouterSeance(months, id, { itemId: "d-cours-b", eleveId, date: `${date}T18:00`, prix, statut });
-    if (pay) payerSeance(months, mid, id, pay, date);
-  };
-  [[3, "el-ines", 25, "especes"], [6, "el-noah", 30, "virement"], [10, "el-ines", 25, "especes"],
-    [13, "el-noah", 30, "virement"], [20, "el-ines", 25, "especes"], [27, "el-noah", 30, null]]
-    .forEach(([day, el, prix, pay]) => add(prev, day, el, prix, "faite", pay));
-  [[2, "el-ines", 25], [5, "el-noah", 30], [9, "el-ines", 25], [12, "el-noah", 30], [16, "el-ines", 25],
-    [19, "el-noah", 30], [23, "el-ines", 25], [26, "el-noah", 30]]
-    .forEach(([day, el, prix], i) => {
-      if (day >= today) return add(cur, day, el, prix, "prevue", null);
-      if (i === 2) return add(cur, day, el, prix, "annulee", null);
-      add(cur, day, el, prix, "faite", i === 3 ? null : i % 2 ? "virement" : "especes");
-    });
+  const rnd = seeded(7);
+  const pad = (n) => String(n).padStart(2, "0");
+  const now = new Date();
+  const today = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())}`;
+  const dayStr = (d) => `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}`;
+  const recent = dayStr(new Date(now.getFullYear(), now.getMonth(), now.getDate() - 10));
+  const rythme = [
+    { eleveId: "el-ines", prix: 25, jours: [1, 3], heure: "17:30", du: addMonths(cur, -5), au: addMonths(cur, 1), mode: "especes", delai: () => 0 },
+    { eleveId: "el-noah", prix: 30, jours: [2, 4], heure: "18:00", du: addMonths(cur, -3), au: addMonths(cur, 1), mode: "virement", delai: () => 1 + Math.floor(rnd() * 4) },
+    { eleveId: "el-sami", prix: 25, jours: [6], heure: "10:00", du: addMonths(cur, -5), au: addMonths(cur, -2), mode: "especes", delai: () => Math.floor(rnd() * 2) }
+  ];
+  let n = 0;
+  rythme.forEach((r) => {
+    const [y, m] = r.du.split("-").map(Number);
+    for (let d = new Date(y, m - 1, 1); monthId(d) <= r.au; d.setDate(d.getDate() + 1)) {
+      if (!r.jours.includes(d.getDay())) continue;
+      const mid = monthId(d);
+      const date = dayStr(d);
+      const id = `d-s-${++n}`;
+      const passee = date < today;
+      const annulee = passee && rnd() < 0.08;
+      ajouterSeance(months, id, { itemId: "d-cours-b", eleveId: r.eleveId, date: `${date}T${r.heure}`, prix: r.prix, statut: !passee ? "prevue" : annulee ? "annulee" : "faite" });
+      if (!passee || annulee) continue;
+      const p = new Date(d);
+      p.setDate(p.getDate() + r.delai());
+      // Noah : les séances des dix derniers jours ne sont pas encore payées.
+      if (dayStr(p) < today && !(r.eleveId === "el-noah" && date >= recent)) payerSeance(months, mid, id, r.mode, dayStr(p));
+    }
+  });
 }
 
 // Marqueur de suppression d'un champ (voir deleteField du store).
