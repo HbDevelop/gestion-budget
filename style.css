@@ -729,8 +729,9 @@ body {
 .sx-eleve.inactif .sx-av { filter: grayscale(1); opacity: 0.6; }
 .sx-av-add { background: var(--sx-accent-soft); color: var(--sx-accent); }
 .sx-eleve-add input[name="nom"] { border-color: var(--border); font-weight: 400; }
-.sx-eleve-del { flex: none; border: none; background: none; padding: 4px; border-radius: 6px; cursor: pointer; opacity: 0.45; font-size: 0.95rem; line-height: 1; }
-.sx-eleve-del:hover, .sx-eleve-del:focus-visible { opacity: 1; background: #fee2e2; }
+.sx-eleve-del { flex: none; display: grid; place-items: center; width: 30px; height: 30px; border: 1px solid transparent; border-radius: 8px; background: none; color: var(--text-muted); cursor: pointer; transition: color 0.15s ease, background 0.15s ease, border-color 0.15s ease; }
+.sx-eleve-del svg { width: 17px; height: 17px; }
+.sx-eleve-del:hover, .sx-eleve-del:focus-visible { color: var(--danger); background: #fef2f2; border-color: #fecaca; }
 
 /* Interrupteur actif / inactif */
 .sx-switch { position: relative; flex: none; width: 34px; height: 20px; cursor: pointer; }
