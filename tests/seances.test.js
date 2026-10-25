@@ -6,7 +6,7 @@ import {
   isSeancesItem, monthOfDate, seancesOfItem, seancesValue, recomputeItem, monthsNeeded,
   ajouterSeance, modifierSeance, payerSeance, annulerPaiement, supprimerSeance, arrieres, elevesOf,
   seancesATarifer, appliquerTarif, datesRecurrentes, programmerSeances, seancesSerie, supprimerSeances,
-  seancesFuturesEleve, statsActivite, arbreRecommandations, descendantsDe, MAX_PROGRAMMATION, seancesFutures, seancesATraiter, marquerFaites
+  seancesFuturesEleve, statsActivite, arbreRecommandations, descendantsDe, ecartMois, MAX_PROGRAMMATION, seancesFutures, seancesATraiter, marquerFaites
 } from "../seances.js";
 import { computeTotals, saveMonthChanges, monthPath } from "../budget-core.js";
 import { createFakeFirestore } from "./helpers/fake-firestore.js";
@@ -687,5 +687,64 @@ describe("bouche-à-oreille", () => {
     ajouterSeance(docs, "a", seance("2026-10-01T18:00", 30, { statut: "faite" }));
     const st = statsActivite([{ id: "2026-10", data: docs["2026-10"] }], [item], "2026-10-15T12:00");
     assert.deepEqual(st.eleves.map((e) => [e.eleveId, e.recommandePar, e.statut]), [["lina", "old", "actif"], ["old", null, "supprime"]]);
+  });
+});
+
+describe("écart prévu / encaissé d'un mois", () => {
+  const mois3 = () => ({ "2026-09": empty(), "2026-10": empty(), "2026-11": empty(), "2026-12": empty() });
+
+  test("tout payé dans le mois : rien à expliquer", () => {
+    const docs = mois3();
+    ajouterSeance(docs, "a", seance("2026-10-06T18:00", 40, { statut: "faite" }));
+    payerSeance(docs, "2026-10", "a", "virement", "2026-10-06");
+    assert.equal(ecartMois(docs["2026-10"], "2026-10", ETU), null);
+    assert.equal(ecartMois(docs["2026-09"], "2026-09", ETU), null);
+  });
+
+  test("séance payée le mois suivant : expliquée des deux côtés", () => {
+    const docs = mois3();
+    ajouterSeance(docs, "a", seance("2026-09-29T18:00", 40, { statut: "faite" }));
+    payerSeance(docs, "2026-09", "a", "virement", "2026-10-06");
+    ajouterSeance(docs, "b", seance("2026-10-06T18:00", 40, { statut: "faite" }));
+    assert.deepEqual(ecartMois(docs["2026-09"], "2026-09", ETU),
+      { recus: [], ailleurs: [{ mois: "2026-10", n: 1, total: 40 }], sansSeance: false });
+    assert.deepEqual(ecartMois(docs["2026-10"], "2026-10", ETU),
+      { recus: [{ mois: "2026-09", n: 1, total: 40 }], ailleurs: [], sansSeance: false });
+  });
+
+  test("plusieurs séances et plusieurs mois, regroupés par mois", () => {
+    const docs = mois3();
+    ajouterSeance(docs, "a", seance("2026-09-22T18:00", 40, { statut: "faite" }));
+    ajouterSeance(docs, "b", seance("2026-09-29T18:00", 30, { statut: "faite" }));
+    ajouterSeance(docs, "c", seance("2026-10-27T18:00", 50, { statut: "faite" }));
+    ajouterSeance(docs, "d", seance("2026-11-03T18:00", 40, { statut: "faite" }));
+    payerSeance(docs, "2026-09", "a", "virement", "2026-11-05");
+    payerSeance(docs, "2026-09", "b", "especes", "2026-11-05");
+    payerSeance(docs, "2026-10", "c", "virement", "2026-11-05");
+    payerSeance(docs, "2026-11", "d", "virement", "2026-11-05");
+    assert.deepEqual(ecartMois(docs["2026-11"], "2026-11", ETU).recus,
+      [{ mois: "2026-09", n: 2, total: 70 }, { mois: "2026-10", n: 1, total: 50 }]);
+  });
+
+  test("mois sans séance qui reçoit un paiement : signalé", () => {
+    const docs = mois3();
+    ajouterSeance(docs, "a", seance("2026-11-24T18:00", 40, { statut: "faite" }));
+    payerSeance(docs, "2026-11", "a", "especes", "2026-12-02");
+    assert.deepEqual(ecartMois(docs["2026-12"], "2026-12", ETU),
+      { recus: [{ mois: "2026-11", n: 1, total: 40 }], ailleurs: [], sansSeance: true });
+  });
+
+  test("paiement annulé ou séance déplacée : l'écart suit", () => {
+    const docs = mois3();
+    ajouterSeance(docs, "a", seance("2026-09-29T18:00", 40, { statut: "faite" }));
+    payerSeance(docs, "2026-09", "a", "virement", "2026-10-06");
+    annulerPaiement(docs, "2026-09", "a");
+    assert.equal(ecartMois(docs["2026-09"], "2026-09", ETU), null);
+    assert.equal(ecartMois(docs["2026-10"], "2026-10", ETU), null);
+    // Payée le 06/10, puis la séance est déplacée au 02/10 : plus d'écart.
+    payerSeance(docs, "2026-09", "a", "virement", "2026-10-06");
+    modifierSeance(docs, "2026-09", "a", { date: "2026-10-02T18:00" });
+    assert.equal(ecartMois(docs["2026-10"], "2026-10", ETU), null);
+    assert.equal(ecartMois(docs["2026-09"], "2026-09", ETU), null);
   });
 });

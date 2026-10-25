@@ -707,3 +707,27 @@ export function descendantsDe(eleves, id) {
   }
   return out;
 }
+
+// ---- Écart entre prévu et encaissé d'un mois (Suivi) ----
+// Le prévu d'un poste à séances = l'activité du mois (ses séances), l'encaissé = l'argent arrivé
+// ce mois-ci : ils diffèrent quand une séance est payée un autre mois. Pour le mois `mid`
+// (`data` = son document) : `recus` = argent reçu ce mois-ci pour des séances d'autres mois,
+// `ailleurs` = séances de ce mois payées un autre mois, chacun [{ mois, n, total }] trié par
+// mois ; `sansSeance` = le mois n'a aucune séance (son prévu est alors une estimation saisie à
+// la main). null s'il n'y a rien à expliquer.
+export function ecartMois(data, mid, itemId) {
+  const grouper = (liste, cle) => {
+    const out = {};
+    liste.forEach((x) => {
+      const o = out[cle(x)] || (out[cle(x)] = { mois: cle(x), n: 0, total: 0 });
+      o.n += 1;
+      o.total = cents(o.total + (x.prix || 0));
+    });
+    return Object.values(out).sort((a, b) => (a.mois < b.mois ? -1 : 1));
+  };
+  const seances = seancesOfItem(data, itemId);
+  const recus = grouper(paiementsOfItem(data, itemId).filter((p) => p.seanceMois && p.seanceMois !== mid), (p) => p.seanceMois);
+  const ailleurs = grouper(seances.filter((s) => s.paiement && monthOfDate(s.paiement.date) !== mid), (s) => monthOfDate(s.paiement.date));
+  if (!recus.length && !ailleurs.length) return null;
+  return { recus, ailleurs, sansSeance: !seances.length };
+}

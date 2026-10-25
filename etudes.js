@@ -3,7 +3,7 @@
 // statsActivite (seances.js). Pas de Firebase ici : app.js lit les mois et appelle renderEtudes.
 
 import { prochainesVacances, vacancesDuMois, lendemain } from "./calendrier.js?v=1";
-import { arbreRecommandations } from "./seances.js?v=10";
+import { arbreRecommandations } from "./seances.js?v=11";
 
 const JOURS = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"];
 const COULEURS = { virement: "#2563eb", especes: "#d97706", accent: "#7c3aed" };
