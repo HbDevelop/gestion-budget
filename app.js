@@ -2017,7 +2017,7 @@ function gridRow(item, ids, monthsByI, opts) {
     } else if (opts.editable && v && v.materiel) {
       // Mois avec des achats de matériel : calculé à partir des achats (onglet Matériel) ; les
       // autres mois restent une prévision saisie à la main.
-      row += `<td><span class="calc-mat" title="Calculé à partir des achats : onglet Matériel">${euros(amount)}</span></td>`;
+      row += `<td>${calcBoxMateriel(item, id, v, opts.materiel, i >= ids.length - 2)}</td>`;
     } else if (opts.editable) {
       row += `<td><input class="forecast-input" type="number" step="0.01" value="${amount}"
         data-month-id-attr="${id}" data-item-id="${item.id}" /></td>`;
@@ -2043,6 +2043,19 @@ function calcBox(item, data, amount, aDroite, aide = "Modifiable dans le Suivi �
     `<span>${actives} séance${actives > 1 ? "s" : ""} · ${euros(amount)}</span>` +
     (detail ? `<span class="calc-tip-detail">${detail}</span>` : "") +
     `<small>${aide}</small></span></div>`;
+}
+
+// Prévisions : mois avec des achats de matériel, même gabarit que les montants calculés à partir
+// des séances (champ en pointillés + étiquette au survol / au toucher), aux couleurs du matériel.
+function calcBoxMateriel(item, mid, v, materiel, aDroite) {
+  const achats = achatsDe(materiel, item.owner).filter((a) => a.date.startsWith(mid));
+  const n = achats.length;
+  return `<div class="calc-box calc-box-mat${aDroite ? " calc-right" : ""}" tabindex="0" aria-label="${escapeAttr(`${euros(v.amount)}, calculé à partir de ${n} achat${n > 1 ? "s" : ""} de matériel`)}">` +
+    `<span class="calc-val">${v.amount}</span><span class="calc-ico" aria-hidden="true">🔊</span>` +
+    `<span class="calc-tip" role="tooltip"><b>Calculé à partir des achats</b>` +
+    achats.map((a) => `<span>${escapeHtml(a.nom || "Sans nom")} · ${euros(a.prix)}${a.date > todayStr() ? " (prévu)" : ""}</span>`).join("") +
+    (v.prevuMateriel ? `<span class="calc-tip-detail">Prévu au budget : ${euros(v.prevuMateriel)}</span>` : "") +
+    `<small>Modifiable dans l'onglet Matériel</small></span></div>`;
 }
 
 function gridTotalRow(label, ids, monthsByI, getValue, strong, key) {
@@ -2103,8 +2116,10 @@ async function renderForecast() {
   ids.forEach((id, i) => { monthsByI[id] = docs[i] || { values: {} }; });
 
   const activeItems = forecastListedItems();
+  // Achats de matériel : détail des mois calculés (voir calcBoxMateriel).
+  const materiel = activeItems.some((it) => it.role === "materiel") ? (await fetchSettings()).materiel : null;
   forecastTable.classList.toggle("compact", !forecastEdit);
-  buildMonthGrid(forecastTable, ids, monthsByI, activeItems, { editable: true, structural: forecastEdit });
+  buildMonthGrid(forecastTable, ids, monthsByI, activeItems, { editable: true, structural: forecastEdit, materiel });
 
   forecastTable.querySelectorAll(".forecast-input").forEach((input) => {
     input.addEventListener("change", async () => {
