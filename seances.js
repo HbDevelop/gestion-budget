@@ -417,6 +417,21 @@ export function seancesSerie(months, serieId, depuis) {
   return out.sort((a, b) => (a.date < b.date ? -1 : 1));
 }
 
+// Séances d'un élève après `depuis` ("AAAA-MM-JJTHH:MM" exclu), à supprimer avec lui : non
+// payées (annulées comprises) ; les séances payées et celles déjà passées restent.
+// `months` = [{ id, data }].
+export function seancesFuturesEleve(months, itemId, eleveId, depuis) {
+  const out = [];
+  months.forEach(({ id, data }) => {
+    Object.entries((data && data.seances) || {}).forEach(([sid, s]) => {
+      if (!s || s.itemId !== itemId || s.eleveId !== eleveId) return;
+      if (s.paiement || s.date <= depuis) return;
+      out.push({ id: sid, mois: id, ...s });
+    });
+  });
+  return out.sort((a, b) => (a.date < b.date ? -1 : 1));
+}
+
 export function supprimerSeances(docs, seances) {
   const changes = {};
   seances.forEach((s) => {
@@ -469,8 +484,10 @@ export function marquerFaites(docs, seances) {
   return changes;
 }
 
-// Élèves d'un poste (copie triée par nom, actifs d'abord).
-export function elevesOf(item) {
-  return [...((item && item.eleves) || [])].sort((a, b) =>
+// Élèves d'un poste (copie triée par nom, actifs d'abord). Un élève supprimé (`supprime`) est
+// gardé dans item.eleves pour le nom de ses séances passées, mais n'est plus listé, sauf
+// `avec` (l'élève d'une séance modifiée).
+export function elevesOf(item, { avec = null } = {}) {
+  return ((item && item.eleves) || []).filter((e) => !e.supprime || e.id === avec).sort((a, b) =>
     (a.actif === false) - (b.actif === false) || String(a.nom).localeCompare(String(b.nom), "fr"));
 }

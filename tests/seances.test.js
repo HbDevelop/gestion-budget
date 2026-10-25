@@ -6,7 +6,7 @@ import {
   isSeancesItem, monthOfDate, seancesOfItem, seancesValue, recomputeItem, monthsNeeded,
   ajouterSeance, modifierSeance, payerSeance, annulerPaiement, supprimerSeance, arrieres, elevesOf,
   seancesATarifer, appliquerTarif, datesRecurrentes, programmerSeances, seancesSerie, supprimerSeances,
-  MAX_PROGRAMMATION, seancesFutures, seancesATraiter, marquerFaites
+  seancesFuturesEleve, MAX_PROGRAMMATION, seancesFutures, seancesATraiter, marquerFaites
 } from "../seances.js";
 import { computeTotals, saveMonthChanges, monthPath } from "../budget-core.js";
 import { createFakeFirestore } from "./helpers/fake-firestore.js";
@@ -260,6 +260,33 @@ describe("élèves", () => {
     const item = { eleves: [{ id: "1", nom: "Zoé", tarif: 20 }, { id: "2", nom: "adam", tarif: 30, actif: false }, { id: "3", nom: "Lina", tarif: 25 }] };
     assert.deepEqual(elevesOf(item).map((e) => e.nom), ["Lina", "Zoé", "adam"]);
     assert.deepEqual(elevesOf({}), []);
+  });
+
+  test("élève supprimé : plus listé, sauf pour modifier une de ses séances", () => {
+    const item = { eleves: [{ id: "1", nom: "Zoé" }, { id: "2", nom: "Adam", actif: false, supprime: true }] };
+    assert.deepEqual(elevesOf(item).map((e) => e.id), ["1"]);
+    assert.deepEqual(elevesOf(item, { avec: "2" }).map((e) => e.id), ["1", "2"]);
+  });
+
+  test("supprimer un élève : ses séances à venir non payées disparaissent, le reste est gardé", () => {
+    const docs = { "2026-10": empty(), "2026-11": empty() };
+    ajouterSeance(docs, "passee", seance("2026-10-20T18:00", 30, { statut: "faite" }));
+    ajouterSeance(docs, "plusTot", seance("2026-10-25T09:00", 30));
+    ajouterSeance(docs, "soir", seance("2026-10-25T18:00", 30));
+    ajouterSeance(docs, "annulee", seance("2026-10-28T18:00", 30, { statut: "annulee" }));
+    ajouterSeance(docs, "nov", seance("2026-11-03T18:00", 30));
+    ajouterSeance(docs, "payee", seance("2026-11-10T18:00", 30, { statut: "faite" }));
+    payerSeance(docs, "2026-11", "payee", "virement", "2026-10-24");
+    ajouterSeance(docs, "autreEleve", seance("2026-11-03T18:00", 25, { eleveId: "adam" }));
+    const list = (d) => Object.entries(d).map(([id, data]) => ({ id, data }));
+    const cibles = seancesFuturesEleve(list(docs), ETU, "lina", "2026-10-25T12:00");
+    assert.deepEqual(cibles.map((s) => s.id), ["soir", "annulee", "nov"]);
+    assert.deepEqual(monthsNeeded("supprimerListe", { seances: cibles }), ["2026-10", "2026-11"]);
+    supprimerSeances(docs, cibles);
+    assert.deepEqual(Object.keys(docs["2026-10"].seances).sort(), ["passee", "plusTot"]);
+    assert.deepEqual(Object.keys(docs["2026-11"].seances).sort(), ["autreEleve", "payee"]);
+    assert.equal(docs["2026-10"].values[ETU].amount, 60);
+    assert.equal(docs["2026-11"].values[ETU].amount, 55);
   });
 });
 
