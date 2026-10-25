@@ -1901,3 +1901,9 @@ body {
 .et-bao-seuls > div { display: flex; flex-wrap: wrap; gap: 6px; }
 .et-pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px 3px 3px; border-radius: 99px; background: #f8fafc; border: 1px solid var(--border); font-size: 13px; font-weight: 600; }
 .et-pill .sx-av { width: 22px; height: 22px; font-size: 11px; }
+
+/* Poste à séances : prévu (activité du mois) ≠ encaissé (argent arrivé ce mois-ci) — explication */
+.sx-ecart { display: flex; gap: 8px; align-items: flex-start; padding: 8px 10px; border-radius: 10px; background: var(--sx-info-soft, #eff6ff); color: #1e3a8a; font-size: 12.5px; line-height: 1.45; }
+.sx-ecart p { margin: 0; }
+.sx-ecart p + p { margin-top: 3px; }
+.sx-ecart-ico { flex: none; }
