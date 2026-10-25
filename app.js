@@ -7,7 +7,7 @@ import {
   getFirestore, doc, getDoc as fbGetDoc, setDoc as fbSetDoc, updateDoc as fbUpdateDoc, deleteField,
   collection, getDocs as fbGetDocs, query, orderBy
 } from "https://www.gstatic.com/firebasejs/10.13.2/firebase-firestore.js";
-import { isDemoEmail, createDemoStore, DEMO_LABELS } from "./demo.js?v=13";
+import { isDemoEmail, createDemoStore, DEMO_LABELS } from "./demo.js?v=14";
 import {
   monthId, addMonths, isActiveAt, inScope, isShared, receivedOf, cashOf, virementOf,
   withIncomeAmount, sumBankBalances, bankFor, cashFor, computeTotals, cloneForNewMonth,
@@ -18,9 +18,9 @@ import {
   isSeancesItem, hasSeances, seancesOfItem, monthOfDate, monthsNeeded, ajouterSeance, modifierSeance,
   payerSeance, annulerPaiement, supprimerSeance, arrieres, elevesOf, seancesATarifer, appliquerTarif,
   datesRecurrentes, programmerSeances, seancesSerie, supprimerSeances, seancesFutures, seancesFuturesEleve,
-  seancesATraiter, marquerFaites, statsActivite
-} from "./seances.js?v=9";
-import { renderEtudes, eleveHue } from "./etudes.js?v=2";
+  seancesATraiter, marquerFaites, statsActivite, descendantsDe
+} from "./seances.js?v=10";
+import { renderEtudes, eleveHue } from "./etudes.js?v=3";
 import { infoJour, vacancesDuMois, feriesDuMois, lendemain } from "./calendrier.js?v=1";
 
 const app = initializeApp(firebaseConfig);
@@ -1365,7 +1365,19 @@ function programmationForm(item) {
 // Corbeille (contour), même trait que les icônes de mode de paiement.
 const TRASH_ICON = `<svg viewBox="0 0 16 16" aria-hidden="true"><path d="M2.5 4h11M6.5 4V2.5h3V4M4 4l.7 9.1a1 1 0 0 0 1 .9h4.6a1 1 0 0 0 1-.9L12 4M6.75 6.5v5M9.25 6.5v5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>`;
 
-// Élèves du poste (catalogue) : nom, tarif par séance, actif.
+// Bouche-à-oreille : liste « Recommandé par » d'un élève (`e`, ou null pour un nouvel élève).
+// Ni lui-même ni ceux qu'il a recommandés (boucle) ; un parrain supprimé reste affiché.
+function recoSelect(item, e, name) {
+  const tous = item.eleves || [];
+  const exclus = e ? descendantsDe(tous, e.id) : new Set();
+  const choix = elevesOf(item, { avec: e && e.recommandePar }).filter((x) => !e || (x.id !== e.id && !exclus.has(x.id)));
+  return `<label class="sx-eleve-reco"><span>🤝 Recommandé par</span><select ${name}>` +
+    `<option value="">— personne (venu directement) —</option>` +
+    choix.map((x) => `<option value="${escapeAttr(x.id)}"${e && e.recommandePar === x.id ? " selected" : ""}>${escapeHtml(x.nom)}${x.supprime ? " (supprimé)" : ""}</option>`).join("") +
+    `</select></label>`;
+}
+
+// Élèves du poste (catalogue) : nom, tarif par séance, actif, recommandé par.
 function elevesEditor(item) {
   const box = el("details", "sx-eleves");
   const list = elevesOf(item);
@@ -1385,8 +1397,13 @@ function elevesEditor(item) {
       `<input type="text" class="eleve-nom" value="${escapeAttr(e.nom)}" aria-label="Nom" />` +
       `<span class="sx-euro sx-tarif"><input type="number" class="eleve-tarif" step="0.01" min="0" value="${typeof e.tarif === "number" ? e.tarif : ""}" aria-label="Tarif par séance" /><i>€ / séance</i></span>` +
       `<label class="sx-switch" title="${e.actif === false ? "Inactif : n'apparaît plus dans les nouvelles séances" : "Actif"}"><input type="checkbox" ${e.actif === false ? "" : "checked"} aria-label="Actif" /><span></span></label>` +
-      `<button type="button" class="sx-eleve-del" title="Supprimer l'élève et ses séances à venir" aria-label="Supprimer ${escapeAttr(e.nom)}">${TRASH_ICON}</button>`;
+      `<button type="button" class="sx-eleve-del" title="Supprimer l'élève et ses séances à venir" aria-label="Supprimer ${escapeAttr(e.nom)}">${TRASH_ICON}</button>` +
+      recoSelect(item, e, `class="eleve-reco" aria-label="Recommandé par"`);
     const target = () => item.eleves.find((x) => x.id === e.id);
+    row.querySelector(".eleve-reco").addEventListener("change", (ev) => {
+      target().recommandePar = ev.target.value || null;
+      save();
+    });
     row.querySelector(".eleve-nom").addEventListener("change", (ev) => {
       const nom = ev.target.value.trim();
       if (nom) { target().nom = nom; save(); }
@@ -1434,14 +1451,15 @@ function elevesEditor(item) {
     `<span class="sx-av sx-av-add">＋</span>` +
     `<input type="text" name="nom" placeholder="Nouvel élève" required />` +
     `<span class="sx-euro sx-tarif"><input type="number" name="tarif" step="0.01" min="0" placeholder="Tarif" /><i>€ / séance</i></span>` +
-    `<button type="submit" class="sx-btn">Ajouter</button>`;
+    `<button type="submit" class="sx-btn">Ajouter</button>` +
+    recoSelect(item, null, `name="reco"`);
   add.addEventListener("submit", (ev) => {
     ev.preventDefault();
     const nom = add.elements.nom.value.trim();
     if (!nom) return;
     const t = parseFloat(add.elements.tarif.value);
     if (!item.eleves) item.eleves = [];
-    item.eleves.push({ id: uid(), nom, tarif: t >= 0 ? t : null, actif: true });
+    item.eleves.push({ id: uid(), nom, tarif: t >= 0 ? t : null, actif: true, recommandePar: add.elements.reco.value || null });
     seancesOuverts.add(item.id);
     elevesOuverts.add(item.id);
     save();

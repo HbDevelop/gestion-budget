@@ -3,6 +3,7 @@
 // statsActivite (seances.js). Pas de Firebase ici : app.js lit les mois et appelle renderEtudes.
 
 import { prochainesVacances, vacancesDuMois, lendemain } from "./calendrier.js?v=1";
+import { arbreRecommandations } from "./seances.js?v=10";
 
 const JOURS = ["Lundi", "Mardi", "Mercredi", "Jeudi", "Vendredi", "Samedi", "Dimanche"];
 const COULEURS = { virement: "#2563eb", especes: "#d97706", accent: "#7c3aed" };
@@ -63,6 +64,8 @@ export function renderEtudes(root, stats, { label = "Études", maintenant } = {}
     grille(modesPaiement(stats), fiabilite(stats)),
     titre("Élèves"),
     elevesCard(stats),
+    titre("Bouche-à-oreille"),
+    boucheAOreille(stats, label),
     titre("Rythme et séances à venir"),
     grille(rythme(stats), aVenir(stats, maintenant))
   );
@@ -305,5 +308,62 @@ function aVenir(st, maintenant) {
       `<li><span>${moisLong(m.id)}${vacancesDuMois(m.id).map((v) => ` <em class="et-vac-tag" title="${esc(v.nom)}">🏖️ ${esc(v.court)}</em>`).join("")}</span><span class="et-bar"><i style="width:${(m.total / max) * 100}%"></i></span>` +
       `<b>${euros(m.total, false)}</b><small>${plur(m.nombre, "séance")}</small></li>`).join("") +
     `</ul>` + vacHtml;
+  return card;
+}
+
+// Arbre du bouche-à-oreille : qui a ramené qui (élève → élèves qu'il a recommandés), avec ce
+// que chacun a payé et ce que ses recommandations ont rapporté. Liens : liste des élèves du
+// journal (« Recommandé par »).
+function boucheAOreille(st, label) {
+  const card = el("section", "card et-bao");
+  const eleves = st.eleves.filter((e) => e.eleveId).map((e) => ({
+    ...e, id: `${e.itemId}|${e.eleveId}`, recommandePar: e.recommandePar ? `${e.itemId}|${e.recommandePar}` : null
+  }));
+  if (!eleves.length) {
+    card.appendChild(el("p", "et-muted", "Aucun élève pour l'instant."));
+    return card;
+  }
+  const racines = arbreRecommandations(eleves);
+  // Descendants (recommandés directement ou de proche en proche) : nombre et argent payé.
+  const apport = (n) => n.enfants.reduce((acc, c) => {
+    const sous = apport(c);
+    return { nb: acc.nb + 1 + sous.nb, paye: acc.paye + c.paye + sous.paye };
+  }, { nb: 0, paye: 0 });
+  const tous = [];
+  const parcours = (n) => { tous.push(n); n.enfants.forEach(parcours); };
+  racines.forEach(parcours);
+  const recommandes = tous.filter((n) => n.lien);
+  if (!recommandes.length) {
+    card.innerHTML = `<p class="et-bao-hint">🤝 Aucune recommandation enregistrée pour l'instant. Indique qui a recommandé chaque élève ` +
+      `dans <b>Suivi du mois → ${esc(label)} → Journal → 👥 Élèves</b> (« Recommandé par »), ou au moment d'ajouter un nouvel élève.</p>`;
+    return card;
+  }
+  const ambassadeur = tous.map((n) => ({ n, a: apport(n) })).sort((x, y) => y.a.nb - x.a.nb || y.a.paye - x.a.paye)[0];
+  const payeReco = recommandes.reduce((t, n) => t + n.paye, 0);
+  card.innerHTML =
+    `<div class="et-bao-kpis">` +
+      `<div><small>Venus par recommandation</small><b>${recommandes.length} <span>/ ${plur(tous.length, "élève")}</span></b></div>` +
+      `<div><small>Encaissé grâce aux recommandations</small><b>${euros(payeReco, false)}</b></div>` +
+      `<div><small>Meilleur ambassadeur</small><b>${esc(ambassadeur.n.nom)}</b>` +
+        `<span>a ramené ${plur(ambassadeur.a.nb, "élève")}${ambassadeur.a.paye ? ` · ${euros(ambassadeur.a.paye, false)}` : ""}</span></div>` +
+    `</div>`;
+  const noeud = (n) => {
+    const a = apport(n);
+    const chip = n.statut === "actif" ? "" : `<span class="et-chip et-chip-${n.statut}">${n.statut === "supprime" ? "supprimé" : "inactif"}</span>`;
+    return `<li><div class="et-node${n.statut === "actif" ? "" : " is-off"}${a.nb ? " has-kids" : ""}">` +
+      avatar(n) +
+      `<span class="et-node-txt"><b>${esc(n.nom)}</b>${chip}<small>${plur(n.faites, "séance")} · ${euros(n.paye, false)}</small></span>` +
+      (a.nb ? `<span class="et-node-badge" title="Élèves recommandés, directement ou de proche en proche">🤝 ${a.nb}${a.paye ? ` · ${euros(a.paye, false)}` : ""}</span>` : "") +
+      `</div>` +
+      (n.enfants.length ? `<ul>${[...n.enfants].sort((x, y) => apport(y).nb - apport(x).nb || y.paye - x.paye).map(noeud).join("")}</ul>` : "") +
+      `</li>`;
+  };
+  // D'abord les arbres qui ont des branches, puis les élèves venus seuls.
+  const avecBranches = racines.filter((r) => r.enfants.length).sort((x, y) => apport(y).nb - apport(x).nb);
+  const seuls = racines.filter((r) => !r.enfants.length);
+  card.innerHTML +=
+    `<ul class="et-tree">${avecBranches.map(noeud).join("")}</ul>` +
+    (seuls.length ? `<div class="et-bao-seuls"><small>Venus directement, sans recommandation pour l'instant</small>` +
+      `<div>${seuls.map((n) => `<span class="et-pill${n.statut === "actif" ? "" : " is-off"}">${avatar(n)}${esc(n.nom)}</span>`).join("")}</div></div>` : "");
   return card;
 }

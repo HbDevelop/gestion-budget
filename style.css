@@ -1864,3 +1864,40 @@ body {
 .et-vac { display: flex; gap: 8px; align-items: flex-start; margin-top: 14px; padding: 10px 12px; border-radius: 10px; background: var(--vac-soft); color: var(--vac); font-size: 13px; border-left: 3px solid var(--vac); }
 .et-vac-tag { margin-left: 4px; padding: 1px 6px; border-radius: 99px; background: var(--vac-soft); color: var(--vac); font-size: 11px; font-style: normal; font-weight: 600; white-space: nowrap; }
 .et-avenir-mois li { grid-template-columns: minmax(110px, auto) minmax(0, 1fr) auto 70px; }
+
+/* Bouche-à-oreille : « Recommandé par » sous chaque élève (liste des élèves du journal) */
+.sx-eleve { flex-wrap: wrap; }
+.sx-eleve-reco { display: flex; align-items: center; gap: 8px; flex-basis: 100%; padding-left: 34px; font-size: 12px; color: var(--text-muted); }
+.sx-eleve-reco select { flex: 0 1 240px; min-width: 0; padding: 4px 8px; border: 1px solid var(--border); border-radius: 8px; background: #fff; font-size: 12.5px; color: var(--text); }
+.sx-eleve-reco select:focus { outline: none; border-color: var(--sx-accent, #7c3aed); }
+
+/* Onglet Études : arbre du bouche-à-oreille */
+.et-bao-hint { margin: 0; padding: 12px 14px; border-radius: 10px; background: var(--et-soft); color: var(--text); font-size: 13px; line-height: 1.5; }
+.et-bao-kpis { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 10px; margin-bottom: 18px; }
+.et-bao-kpis > div { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border-radius: 10px; background: #fbfaff; border: 1px solid #efeafd; }
+.et-bao-kpis small { font-size: 11.5px; color: var(--text-muted); }
+.et-bao-kpis b { font-size: 18px; color: var(--et); }
+.et-bao-kpis b span, .et-bao-kpis > div > span { font-size: 12px; font-weight: 500; color: var(--text-muted); }
+
+/* Arbre : traits de liaison en CSS (chaque niveau décalé, ligne verticale + coude). */
+.et-tree, .et-tree ul { list-style: none; margin: 0; padding: 0; }
+.et-tree ul { margin-left: 22px; padding-left: 18px; border-left: 2px solid #e4dcfb; }
+.et-tree > li + li { margin-top: 14px; }
+.et-tree li { position: relative; }
+.et-tree ul > li { padding-top: 8px; }
+.et-tree ul > li::before { content: ""; position: absolute; left: -20px; top: 26px; width: 16px; border-top: 2px solid #e4dcfb; }
+.et-tree ul > li:last-child::after { content: ""; position: absolute; left: -21px; top: 27px; bottom: 0; width: 4px; background: var(--card-bg); }
+.et-node { display: inline-flex; align-items: center; gap: 10px; max-width: 100%; padding: 8px 12px; border-radius: 12px; background: #fff; border: 1px solid var(--border); box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04); }
+.et-node.has-kids { border-color: #d8ccfb; background: #fdfcff; }
+.et-node .sx-av { width: 30px; height: 30px; font-size: 13px; }
+.et-node-txt { display: flex; flex-wrap: wrap; align-items: baseline; gap: 2px 6px; min-width: 0; }
+.et-node-txt b { font-size: 14px; }
+.et-node-txt small { flex-basis: 100%; font-size: 12px; color: var(--text-muted); }
+.et-node-badge { flex: none; padding: 3px 8px; border-radius: 99px; background: var(--et-soft); color: var(--et); font-size: 12px; font-weight: 700; white-space: nowrap; }
+.et-node.is-off .sx-av, .et-pill.is-off .sx-av { filter: grayscale(1); opacity: 0.6; }
+.et-node.is-off b { color: var(--text-muted); }
+.et-bao-seuls { margin-top: 18px; padding-top: 12px; border-top: 1px dashed var(--border); }
+.et-bao-seuls small { display: block; margin-bottom: 8px; font-size: 12px; color: var(--text-muted); }
+.et-bao-seuls > div { display: flex; flex-wrap: wrap; gap: 6px; }
+.et-pill { display: inline-flex; align-items: center; gap: 6px; padding: 3px 10px 3px 3px; border-radius: 99px; background: #f8fafc; border: 1px solid var(--border); font-size: 13px; font-weight: 600; }
+.et-pill .sx-av { width: 22px; height: 22px; font-size: 11px; }

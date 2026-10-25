@@ -6,7 +6,7 @@ import {
   isSeancesItem, monthOfDate, seancesOfItem, seancesValue, recomputeItem, monthsNeeded,
   ajouterSeance, modifierSeance, payerSeance, annulerPaiement, supprimerSeance, arrieres, elevesOf,
   seancesATarifer, appliquerTarif, datesRecurrentes, programmerSeances, seancesSerie, supprimerSeances,
-  seancesFuturesEleve, statsActivite, MAX_PROGRAMMATION, seancesFutures, seancesATraiter, marquerFaites
+  seancesFuturesEleve, statsActivite, arbreRecommandations, descendantsDe, MAX_PROGRAMMATION, seancesFutures, seancesATraiter, marquerFaites
 } from "../seances.js";
 import { computeTotals, saveMonthChanges, monthPath } from "../budget-core.js";
 import { createFakeFirestore } from "./helpers/fake-firestore.js";
@@ -648,5 +648,44 @@ describe("analyse de l'activité (onglet Études)", () => {
     assert.equal(st.aVenir.total, 60);
     assert.deepEqual(st.aVenir.prochaine, { date: "2026-10-20T18:00", nom: "Lina", prix: 30 });
     assert.deepEqual(st.aVenir.parMois.map((m) => [m.id, m.nombre]), [["2026-10", 1], ["2026-11", 1]]);
+  });
+});
+
+describe("bouche-à-oreille", () => {
+  // Maya (directe) → Claudia → Claudia sœur ; Maya → Antonia ; Zoé directe.
+  const eleves = [
+    { id: "maya" }, { id: "claudia", recommandePar: "maya" }, { id: "soeur", recommandePar: "claudia" },
+    { id: "antonia", recommandePar: "maya" }, { id: "zoe", recommandePar: null }
+  ];
+
+  test("arbre : racines et enfants", () => {
+    const r = arbreRecommandations(eleves);
+    assert.deepEqual(r.map((n) => n.id), ["maya", "zoe"]);
+    assert.deepEqual(r[0].enfants.map((n) => n.id), ["claudia", "antonia"]);
+    assert.deepEqual(r[0].enfants[0].enfants.map((n) => n.id), ["soeur"]);
+    assert.equal(r[0].enfants[0].lien, "maya");
+  });
+
+  test("liens invalides : inconnu, soi-même, boucle → venu directement", () => {
+    const r = arbreRecommandations([
+      { id: "a", recommandePar: "b" }, { id: "b", recommandePar: "a" },
+      { id: "c", recommandePar: "fantome" }, { id: "d", recommandePar: "d" }, { id: "e", recommandePar: "a" }
+    ]);
+    assert.deepEqual(r.map((n) => n.id), ["a", "b", "c", "d"]);
+    assert.deepEqual(r.find((n) => n.id === "a").enfants.map((n) => n.id), ["e"]); // a est dans une boucle, e le suit quand même
+  });
+
+  test("descendants : choix de parrain interdits", () => {
+    assert.deepEqual([...descendantsDe(eleves, "maya")].sort(), ["antonia", "claudia", "soeur"]);
+    assert.deepEqual([...descendantsDe(eleves, "claudia")], ["soeur"]);
+    assert.deepEqual([...descendantsDe(eleves, "zoe")], []);
+  });
+
+  test("statsActivite : recommandePar, et parrain supprimé gardé", () => {
+    const item = { ...etude, eleves: [{ id: "lina", nom: "Lina", recommandePar: "old" }, { id: "old", nom: "Ancien", supprime: true, actif: false }, { id: "x", nom: "X", supprime: true }] };
+    const docs = { "2026-10": empty() };
+    ajouterSeance(docs, "a", seance("2026-10-01T18:00", 30, { statut: "faite" }));
+    const st = statsActivite([{ id: "2026-10", data: docs["2026-10"] }], [item], "2026-10-15T12:00");
+    assert.deepEqual(st.eleves.map((e) => [e.eleveId, e.recommandePar, e.statut]), [["lina", "old", "actif"], ["old", null, "supprime"]]);
   });
 });
