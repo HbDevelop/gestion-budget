@@ -4,7 +4,7 @@
 // rechargement). Le compte de démo ne doit PAS figurer dans les règles Firestore : même en
 // contournant l'appli, il n'a ainsi aucun accès aux vraies données.
 
-import { ajouterSeance, payerSeance } from "./seances.js?v=9";
+import { ajouterSeance, payerSeance } from "./seances.js?v=10";
 
 // Empreinte SHA-256 de l'adresse du compte de démo (en minuscules) : l'adresse elle-même ne
 // figure pas dans ce dépôt public. Pour changer de compte de démo, remplacer cette empreinte.
@@ -60,8 +60,8 @@ function buildDemoData(owners) {
     // Poste à séances (seances.js) : cours particuliers, payés séance par séance.
     item("d-cours-b", "Cours particuliers", "income", b, { gestion: "seances", eleves: [
       { id: "el-ines", nom: "Inès", tarif: 25, actif: true },
-      { id: "el-noah", nom: "Noah", tarif: 30, actif: true },
-      { id: "el-sami", nom: "Sami", tarif: 25, actif: false }
+      { id: "el-noah", nom: "Noah", tarif: 30, actif: true, recommandePar: "el-ines" },
+      { id: "el-sami", nom: "Sami", tarif: 25, actif: false, recommandePar: "el-noah" }
     ] }),
     item("d-loyer", "Loyer", "regulieres", a),
     item("d-elec", "Électricité", "regulieres", a),

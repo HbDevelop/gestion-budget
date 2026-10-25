@@ -544,9 +544,11 @@ export function statsActivite(months, items, maintenant) {
   // Par élève, fiabilité, rythme, à venir.
   const nomOf = {};
   const statutOf = {};
+  const recoOf = {};
   items.forEach((it) => (it.eleves || []).forEach((e) => {
     nomOf[`${it.id}|${e.id}`] = e.nom;
     statutOf[`${it.id}|${e.id}`] = e.supprime ? "supprime" : e.actif === false ? "inactif" : "actif";
+    recoOf[`${it.id}|${e.id}`] = e.recommandePar || null;
   }));
   const eleves = {};
   const eleveOf = (s) => {
@@ -554,13 +556,17 @@ export function statsActivite(months, items, maintenant) {
     if (!eleves[k]) {
       eleves[k] = {
         itemId: s.itemId, eleveId: s.eleveId || null, nom: nomOf[k] || "Sans élève", statut: statutOf[k] || "actif",
+        recommandePar: recoOf[k] || null,
         faites: 0, annulees: 0, passees: 0, paye: 0, impaye: 0, premiere: null, derniere: null, prochaine: null
       };
     }
     return eleves[k];
   };
-  // Élèves sans séance (ajoutés mais pas encore venus) : listés aussi, sauf les supprimés.
-  items.forEach((it) => (it.eleves || []).forEach((e) => { if (!e.supprime) eleveOf({ itemId: it.id, eleveId: e.id }); }));
+  // Élèves sans séance (ajoutés mais pas encore venus) : listés aussi, sauf les supprimés qui
+  // n'ont recommandé personne (ceux-là restent pour l'arbre du bouche-à-oreille).
+  items.forEach((it) => (it.eleves || []).forEach((e) => {
+    if (!e.supprime || (it.eleves || []).some((x) => x.recommandePar === e.id)) eleveOf({ itemId: it.id, eleveId: e.id });
+  }));
 
   let faites = 0, annulees = 0, passees = 0, sommeFaites = 0, aTraiter = 0;
   const impayes = { nombre: 0, total: 0 };
@@ -655,4 +661,49 @@ function monthsBetween(a, b) {
   const [ya, ma] = a.split("-").map(Number);
   const [yb, mb] = b.split("-").map(Number);
   return (yb - ya) * 12 + (mb - ma);
+}
+
+// ---- Bouche-à-oreille ----
+// Un élève peut avoir été recommandé par un autre élève du même poste : `recommandePar` = son
+// id (catalogue, item.eleves). `eleves` = [{ id, recommandePar, ... }].
+
+// Lien valide vers celui qui a recommandé l'élève, ou null : élève inconnu, lui-même, ou
+// boucle qui revient à lui (A recommandé par B, B par A) — il est alors traité comme venu
+// directement. Une boucle plus haut, sans lui, n'empêche pas son propre lien.
+function parrainValide(byId, e) {
+  const p = e.recommandePar;
+  if (!p || !byId[p]) return null;
+  const vus = new Set();
+  for (let x = p; x && byId[x] && !vus.has(x); x = byId[x].recommandePar) {
+    if (x === e.id) return null;
+    vus.add(x);
+  }
+  return p;
+}
+
+// Arbre des recommandations : les élèves venus directement, chacun avec `enfants` (ceux qu'il
+// a recommandés, récursivement) et `lien` (son parrain valide ou null).
+export function arbreRecommandations(eleves) {
+  const byId = Object.fromEntries(eleves.map((e) => [e.id, e]));
+  const nodes = Object.fromEntries(eleves.map((e) => [e.id, { ...e, lien: parrainValide(byId, e), enfants: [] }]));
+  const racines = [];
+  eleves.forEach((e) => {
+    const n = nodes[e.id];
+    if (n.lien) nodes[n.lien].enfants.push(n); else racines.push(n);
+  });
+  return racines;
+}
+
+// Identifiants des élèves recommandés par `id`, directement ou de proche en proche : on ne peut
+// pas choisir l'un d'eux comme parrain de `id` (ce serait une boucle).
+export function descendantsDe(eleves, id) {
+  const out = new Set();
+  const pile = [id];
+  while (pile.length) {
+    const cur = pile.pop();
+    eleves.forEach((e) => {
+      if (e.recommandePar === cur && !out.has(e.id) && e.id !== id) { out.add(e.id); pile.push(e.id); }
+    });
+  }
+  return out;
 }
